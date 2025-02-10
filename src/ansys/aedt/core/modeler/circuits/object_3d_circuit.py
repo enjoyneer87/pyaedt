@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
+# Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
 #
@@ -57,7 +57,6 @@ class CircuitPins(object):
 
         References
         ----------
-
         >>> oPadstackManager.GetComponentPinLocation
         """
         if "Port" in self._circuit_comp.composed_name:
@@ -188,7 +187,6 @@ class CircuitPins(object):
 
         References
         ----------
-
         >>> oPadstackManager.CreatePagePort
         """
         tol = 1e-8
@@ -285,7 +283,7 @@ class CircuitPins(object):
             try:
                 page_name = self._circuit_comp.name.split("@")[1].replace(";", "_")
             except Exception:
-                pass
+                self._component._circuit_components.logger.debug("Cannot parse page name from circuit component name")
         else:
             for cmp in assignment:
                 if "Port" in cmp._circuit_comp.composed_name:
@@ -293,7 +291,9 @@ class CircuitPins(object):
                         page_name = cmp._circuit_comp.name.split("@")[1].replace(";", "_")
                         break
                     except Exception:
-                        continue
+                        self._component._circuit_components.logger.debug(
+                            "Cannot parse page name from circuit component name"
+                        )
         try:
             x_loc = AEDT_UNITS["Length"][decompose_variable_value(self._circuit_comp.location[0])[1]] * float(
                 decompose_variable_value(self._circuit_comp.location[1])[0]
@@ -522,7 +522,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.GetProperties
         >>> oEditor.GetPropertyValue
         """
@@ -558,7 +557,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.GetProperties
         >>> oEditor.GetPropertyValue
         """
@@ -637,7 +635,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.GetPropertyValue
         >>> oEditor.ChangeProperty
         """
@@ -678,7 +675,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.GetPropertyValue
         >>> oEditor.ChangeProperty
         """
@@ -734,7 +730,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.GetPropertyValue
         >>> oEditor.ChangeProperty
         """
@@ -780,7 +775,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.ChangeProperty
         """
         if not color:
@@ -809,7 +803,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.ChangeProperty
         """
         vMaterial = ["NAME:Component Color", "R:=", red, "G:=", green, "B:=", blue]
@@ -834,7 +827,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.ChangeProperty
         """
         if isinstance(name, list):
@@ -894,7 +886,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oEditor.GetPropertyValue
         >>> oEditor.ChangeProperty
         """
@@ -931,7 +922,6 @@ class CircuitComponent(object):
 
         References
         ----------
-
         >>> oModelManager.EditWithComps
         """
         props = self.model_data.props

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
+# Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
 #
@@ -34,6 +34,7 @@ import re
 
 from ansys.aedt.core.application.analysis_3d_layout import FieldAnalysis3DLayout
 from ansys.aedt.core.application.analysis_hf import ScatteringMethods
+from ansys.aedt.core.generic.checks import min_aedt_version
 from ansys.aedt.core.generic.general_methods import generate_unique_name
 from ansys.aedt.core.generic.general_methods import open_file
 from ansys.aedt.core.generic.general_methods import parse_excitation_file
@@ -187,7 +188,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
             remove_lock=remove_lock,
         )
         ScatteringMethods.__init__(self, self)
-        self.onetwork_data_explorer = self.odesktop.GetTool("NdExplorer")
 
     def _init_from_design(self, *args, **kwargs):
         self.__init__(*args, **kwargs)
@@ -259,7 +259,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oEditor.CreateEdgePort
         """
         assignment = self.modeler.convert_to_selections(assignment, False)
@@ -400,7 +399,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oEditor.CreateEdgePort
         """
         if edge_numbers is None:
@@ -478,7 +476,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oEditor.CreateEdgePort
         """
         listp = self.port_list
@@ -522,7 +519,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oEditor.CreateEdgePort
         """
         if isinstance(nets, list):
@@ -555,7 +551,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oEditor.CreateEdgePort
         """
         listp = self.port_list
@@ -604,7 +599,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oEditor.CreateEdgePort
         """
         listp = self.port_list
@@ -658,7 +652,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oEditor.CreatePin
         """
         layers = self.modeler.layers.all_signal_layers
@@ -696,13 +689,15 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
             return False
 
     @pyaedt_function_handler(portname="name")
-    def delete_port(self, name):
+    def delete_port(self, name, remove_geometry=True):
         """Delete a port.
 
         Parameters
         ----------
         name : str
             Name of the port.
+        remove_geometry : bool, optional
+            Whether to remove geometry. The default is ``True``.
 
         Returns
         -------
@@ -711,10 +706,14 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oModule.Delete
+        >>> oModule.DeleteExcitations
         """
-        self.oexcitation.Delete(name)
+        if remove_geometry:
+            self.oexcitation.Delete(name)
+        else:
+            self.oexcitation.DeleteExcitation(name)
+
         for bound in self.boundaries:
             if bound.name == name:
                 self.boundaries.remove(bound)
@@ -736,7 +735,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oModule.ImportEDB
         """
         if "edb.def" not in input_folder:
@@ -770,7 +768,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oDesign.ValidateDesign
         """
         if name is None:
@@ -875,7 +872,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oModule.CreateReport
         """
         solution_data = "Standard"
@@ -910,7 +906,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oDesign.DesignOptions
         """
         touchstone_settings = []
@@ -928,6 +923,7 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
         return True
 
     @pyaedt_function_handler()
+    @min_aedt_version("2025.1")
     def set_export_touchstone(
         self,
         file_format="TouchStone1.0",
@@ -1008,9 +1004,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
 
         """
-        if settings.aedt_version < "2025.1":
-            self.logger.warning("Touchstone export setup aborted. This method is available from AEDT 2025.1.")
-            return False
         preferences = "Planar EM\\"
         design_name = self.design_name
 
@@ -1153,7 +1146,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oModule.AddSweep
         """
         if sweep_type not in ["Discrete", "Interpolating", "Fast"]:
@@ -1266,7 +1258,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oModule.AddSweep
         """
         if sweep_type not in ["Discrete", "Interpolating", "Fast"]:
@@ -1348,7 +1339,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oModule.AddSweep
         """
         if name is None:
@@ -1565,7 +1555,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oModule.ImportExtracta
         """
         return self._import_cad(input_file, "brd", output_dir, control_file, set_as_active, close_active_project)
@@ -1713,7 +1702,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oDesign.EditCoSimulationOptions
 
         Examples
@@ -1899,7 +1887,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
     def get_differential_pairs(self):
         # type: () -> list
         """Get the list defined differential pairs.
-
 
         Returns
         -------
@@ -2174,6 +2161,7 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
         window="hamming",
     ):
         """Edit a source from file data.
+
         File data is a csv containing either frequency data or time domain data that will be converted through FFT.
 
         Parameters
@@ -2308,6 +2296,7 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
     @pyaedt_function_handler(setup_name="setup")
     def get_dcir_solution_data(self, setup, show="RL", category="Loop_Resistance"):
         """Retrieve dcir solution data. Available element_names are dependent on element_type as below.
+
         Sources ["Voltage", "Current", "Power"]
         "RL" ['Loop Resistance', 'Path Resistance', 'Resistance', 'Inductance']
         "Vias" ['X', 'Y', 'Current', 'Limit', 'Resistance', 'IR Drop', 'Power']
@@ -2533,7 +2522,6 @@ class Hfss3dLayout(FieldAnalysis3DLayout, ScatteringMethods):
 
         References
         ----------
-
         >>> oDesign.SetDesignSettings
         """
         if export:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
+# Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
 #
@@ -143,8 +143,10 @@ def unit_system(units):
 
 
 def _resolve_unit_system(unit_system_1, unit_system_2, operation):
-    """Retrieve the unit string of an arithmetic operation on ``Variable`` objects. If no resulting unit system
-    is defined for a specific operation (in unit_system_operations), an empty string is returned
+    """Retrieve the unit string of an arithmetic operation on ``Variable`` objects.
+
+    If no resulting unit system is defined for a specific operation (in unit_system_operations),
+    an empty string is returned.
 
     Parameters
     ----------
@@ -159,7 +161,6 @@ def _resolve_unit_system(unit_system_1, unit_system_2, operation):
     -------
     str
         Unit system when successful, ``""`` when failed.
-
     """
     try:
         key = f"{unit_system_1}_{operation}_{unit_system_2}"
@@ -717,7 +718,6 @@ class SweepType(object):
 class BasisOrder(object):
     """Enumeration-class for HFSS basis order settings.
 
-
     Warning: the value ``single`` has been renamed to ``Single`` for consistency. Please update references to
     ``single``.
     """
@@ -765,6 +765,7 @@ class SOLUTIONS(object):
             ACConduction,
             ElectricTransient,
             TransientAPhiFormulation,
+            DCBiasedEddyCurrent,
         ) = (
             "Transient",
             "Magnetostatic",
@@ -775,6 +776,7 @@ class SOLUTIONS(object):
             "ACConduction",
             "ElectricTransient",
             "TransientAPhiFormulation",
+            "DCBiasedEddyCurrent",
         )
 
     class Maxwell2d(object):
@@ -812,19 +814,11 @@ class SOLUTIONS(object):
         """Provides Icepak solution types."""
 
         (
-            SteadyTemperatureAndFlow,
-            SteadyTemperatureOnly,
-            SteadyFlowOnly,
-            TransientTemperatureAndFlow,
-            TransientTemperatureOnly,
-            TransientFlowOnly,
+            SteadyState,
+            Transient,
         ) = (
-            "SteadyStateTemperatureAndFlow",
-            "SteadyStateTemperatureOnly",
-            "SteadyStateFlowOnly",
-            "TransientTemperatureAndFlow",
-            "TransientTemperatureOnly",
-            "TransientFlowOnly",
+            "SteadyState",
+            "Transient",
         )
 
     class Circuit(object):
@@ -867,7 +861,7 @@ class SOLUTIONS(object):
     class Mechanical(object):
         """Provides Mechanical solution types."""
 
-        (Thermal, Structural, Modal) = ("Thermal", "Structural", "Modal")
+        (Thermal, Structural, Modal, SteadyStateThermal) = ("Thermal", "Structural", "Modal", "Steady-State Thermal")
 
 
 class SETUPS(object):
@@ -885,9 +879,9 @@ class SETUPS(object):
         Electrostatic,
         ElectrostaticDC,
         ElectricTransient,
-        SteadyTemperatureAndFlow,
-        SteadyTemperatureOnly,
-        SteadyFlowOnly,
+        SteadyState,
+        SteadyState,
+        SteadyState,
         Matrix,
         NexximLNA,
         NexximDC,
@@ -910,9 +904,9 @@ class SETUPS(object):
         MechModal,
         GRM,
         TR,
-        TransientTemperatureAndFlow,
-        TransientTemperatureOnly,
-        TransientFlowOnly,
+        Transient,
+        Transient,
+        Transient,
         DFIG,
         TPIM,
         SPIM,

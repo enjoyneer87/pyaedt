@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
+# Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
 #
@@ -34,7 +34,7 @@ import warnings
 from ansys.aedt.core.generic.constants import AllowedMarkers
 from ansys.aedt.core.generic.constants import EnumUnits
 from ansys.aedt.core.generic.data_handlers import _dict2arg
-from ansys.aedt.core.generic.general_methods import GrpcApiError
+from ansys.aedt.core.generic.errors import GrpcApiError
 from ansys.aedt.core.generic.general_methods import check_and_download_file
 from ansys.aedt.core.generic.general_methods import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
@@ -847,9 +847,7 @@ class FolderPlotSettings(BaseFolderPlot):
         self._folder_name = folder_name
 
     def update(self):
-        """
-        Update folder plot settings.
-        """
+        """Update folder plot settings."""
         out = []
         _dict2arg(self.to_dict(), out)
         self._postprocessor.ofieldsreporter.SetPlotFolderSettings(self._folder_name, out[0])

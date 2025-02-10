@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
+# Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
 #
@@ -22,9 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""
-This module contains these Primitives classes: `Polyline` and `Primitives`.
-"""
+"""This module contains these Primitives classes: `Polyline` and `Primitives`."""
 
 from __future__ import absolute_import  # noreorder
 
@@ -62,8 +60,8 @@ from ansys.aedt.core.modeler.cad.modeler import Lists
 from ansys.aedt.core.modeler.cad.modeler import Modeler
 from ansys.aedt.core.modeler.cad.modeler import ObjectCoordinateSystem
 from ansys.aedt.core.modeler.cad.object_3d import Object3d
+from ansys.aedt.core.modeler.cad.object_3d import PolylineSegment
 from ansys.aedt.core.modeler.cad.polylines import Polyline
-from ansys.aedt.core.modeler.cad.polylines import PolylineSegment
 from ansys.aedt.core.modeler.geometry_operators import GeometryOperators
 from ansys.aedt.core.modules.material_lib import Material
 
@@ -213,7 +211,7 @@ class GeometryModeler(Modeler):
     """
 
     @pyaedt_function_handler()
-    def __getitem__(self, partId):
+    def __getitem__(self, partId) -> Object3d:
         """Get the object ``Object3D`` for a given object ID or object name.
 
         Parameters
@@ -445,7 +443,8 @@ class GeometryModeler(Modeler):
 
     @model_units.setter
     def model_units(self, units):
-        assert units in AEDT_UNITS["Length"], f"Invalid units string {units}."
+        if units not in AEDT_UNITS["Length"]:
+            raise RuntimeError(f"Invalid units string {units}.")
         self.oeditor.SetModelUnits(["NAME:Units Parameter", "Units:=", units, "Rescale:=", self.rescale_model])
         self._model_units = units
 
@@ -684,7 +683,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Get3DComponentDefinitionNames
         >>> oEditor.Get3DComponentInstanceNames
         """
@@ -855,39 +853,40 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def _refresh_all_ids_wrapper(self):
-        if settings.aedt_version >= "2025.1":
+        if settings.aedt_version >= "2023.2":
             return self._refresh_all_ids_from_data_model()
         else:
             return self._refresh_all_ids_from_aedt_file()
 
     @pyaedt_function_handler()
     def _refresh_all_ids_from_data_model(self):
-        self._app.logger.info("Refreshing objects from Data Model")
-        from ansys.aedt.core.application import _get_data_model
+        self._app.logger.info("Refreshing bodies from Object Info")
+        self._app.logger.reset_timer()
+        import json
 
-        dm = _get_data_model(self.oeditor, 2)
+        dm = self.oeditor.GetAllObjectInfo(self.object_names)
+        dm = json.loads(dm)
 
-        for attribs in dm.get("children", []):
-            if attribs["type"] == "Part":
-                pid = 0
-                is_polyline = False
-                try:
-                    if attribs["children"][0]["Command"] == "CreatePolyline":
-                        is_polyline = True
-                except Exception:
-                    is_polyline = False
-
-                o = self._create_object(name=attribs["Name"], pid=pid, use_cached=True, is_polyline=is_polyline)
-                o._part_coordinate_system = attribs["Orientation"]
-                o._model = attribs["Model"]
-                o._wireframe = attribs["Display Wireframe"]
-                o._m_groupName = attribs["Model"]
-                o._color = (attribs["Color/Red"], attribs["Color/Green"], attribs["Color/Blue"])
-                o._material_name = attribs.get("Material", None)
-                o._surface_material = attribs.get("Surface Material", None)
-                o._solve_inside = attribs.get("Solve Inside", False)
-                o._is_updated = True
-                # pid+=1
+        for attribs in dm:
+            pid = int(attribs["id"])
+            o = self._create_object(name=attribs["Name"], pid=pid, use_cached=True, is_polyline=None)
+            o._part_coordinate_system = attribs["Orientation"]
+            o._model = True if attribs["Model"] in ["true", True, "True"] else False
+            o._wireframe = True if attribs["Display Wireframe"] in ["true", True, "True"] else False
+            o._m_groupName = attribs.get("Group", None)
+            RGBint = int(attribs["Color"])
+            b = RGBint & 255
+            g = (RGBint >> 8) & 255
+            r = (RGBint >> 16) & 255
+            o._color = (r, g, b)
+            o._material_name = attribs.get("Material", None)
+            if o._material_name:
+                o._material_name = o._material_name[1:-1]
+            o._surface_material = attribs.get("Surface Material", None)
+            o._solve_inside = True if attribs.get("Solve Inside", False) in ["true", True, "True"] else False
+            o._is_updated = True
+            o._transparency = float(attribs.get("Transparent", 0.0))
+        self._app.logger.info_timer("Bodies Info Refreshed")
         return len(self.objects)
 
     @pyaedt_function_handler()
@@ -969,8 +968,7 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def cleanup_objects(self):
-        """Clean up objects that no longer exist in the modeler because
-        they were removed by previous operations.
+        """Clean up objects that no longer exist in the modeler because they were removed by previous operations.
 
         This method also updates object IDs that may have changed via
         a modeler operation such as :func:`ansys.aedt.core.modeler.Model3D.Modeler3D.unite`
@@ -1018,8 +1016,7 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def cleanup_points(self):
-        """Clean up points that no longer exist in the modeler because
-        they were removed by previous operations.
+        """Clean up points that no longer exist in the modeler because they were removed by previous operations.
 
         This method also updates object IDs that may have changed via
         a modeler operation such as :func:`ansys.aedt.core.modeler.Model3D.Modeler3D.unite`
@@ -1041,14 +1038,12 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def find_new_objects(self):
-        """Find any new objects in the modeler that were created
-        by previous operations.
+        """Find any new objects in the modeler that were created by previous operations.
 
         Returns
         -------
         dict
             Dictionary of new objects.
-
         """
         new_objects = []
         for obj_name in self.object_names:
@@ -1058,14 +1053,12 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def add_new_objects(self):
-        """Add objects that have been created in the modeler by
-        previous operations.
+        """Add objects that have been created in the modeler by previous operations.
 
         Returns
         -------
         list
             List of added objects.
-
         """
         added_objects = []
         objs_ids = {}
@@ -1075,14 +1068,12 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def add_new_solids(self):
-        """Add objects that have been created in the modeler by
-        previous operations.
+        """Add objects that have been created in the modeler by previous operations.
 
         Returns
         -------
         list
             List of added objects.
-
         """
         added_objects = []
 
@@ -1107,8 +1098,7 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def add_new_points(self):
-        """Add objects that have been created in the modeler by
-        previous operations.
+        """Add objects that have been created in the modeler by previous operations.
 
         Returns
         -------
@@ -1175,7 +1165,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetObjectsByMaterial
 
         """
@@ -1383,7 +1372,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.FitAll
 
         Examples
@@ -1403,7 +1391,9 @@ class GeometryModeler(Modeler):
             vertices = []
             for vertex in list(self.oeditor.GetVertexIDsFromFace(face)):
                 vertices.append([float(i) for i in list(self.oeditor.GetVertexPosition(vertex))])
-        assert len(vertices) > 2, "Automatic A-B Assignment can be done only on face with more than 2 vertices."
+        if len(vertices) < 3:
+            raise RuntimeError("Automatic A-B assignment requires more than 2 vertices.")
+
         origin = vertices[0]
         a_end = []
         b_end = []
@@ -1441,7 +1431,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CoverLines
         """
         obj_to_cover = self.convert_to_selections(assignment, False)
@@ -1554,7 +1543,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateRelativeCS
         """
         if name:
@@ -1817,7 +1805,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.SetWCS
         """
         if isinstance(name, BaseCoordinateSystem):
@@ -1841,7 +1828,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetActiveCoordinateSystem
         """
 
@@ -1946,7 +1932,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateRelativeCS
         """
         cs_names = [i.name for i in self.coordinate_systems]
@@ -2108,7 +2093,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oDesign.SetObjectDeformation
         """
         self.logger.info("Enabling deformation feedback")
@@ -2144,7 +2128,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oDesign.SetObjectTemperature
         """
         self.logger.info("Set model temperature and enabling Thermal Feedback")
@@ -2305,7 +2288,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreatePolyline
         """
         if orientation > 2:
@@ -2405,7 +2387,7 @@ class GeometryModeler(Modeler):
                     face = f
                     center = c
             except Exception:
-                pass
+                self.logger.debug(f"Cannot retrieve face center from face ID {f}")
         return face
 
     @pyaedt_function_handler()
@@ -2468,7 +2450,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oModule.GetBoundaries
         """
         if self._app.design_type == "Icepak":
@@ -2495,7 +2476,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.ChangeProperty
         """
         selections = self.convert_to_selections(assignment, True)
@@ -2526,7 +2506,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetObjectsInGroup
         """
         if not isinstance(group, str):
@@ -2553,7 +2532,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetObjectsInGroup
         >>> oEditor.GetModelBoundingBox
         """
@@ -2676,7 +2654,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Split
         """
         if plane is None and not tool or plane and tool:
@@ -2824,7 +2801,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.DuplicateMirror
         """
         return self.mirror(
@@ -2861,26 +2837,33 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Mirror
         >>> oEditor.DuplicateMirror
         """
         selections = self.convert_to_selections(assignment)
-        Xpos, Ypos, Zpos = self._pos_with_arg(origin)
-        Xnorm, Ynorm, Znorm = self._pos_with_arg(vector)
+        x_pos, y_pos, z_pos = self._pos_with_arg(origin)
+        x_norm, y_norm, z_norm = self._pos_with_arg(vector)
         if duplicate:
-            vArg1 = ["NAME:Selections", "Selections:=", selections, "NewPartsModelFlag:=", "Model"]
-            vArg2 = ["NAME:DuplicateToMirrorParameters"]
-            vArg2.append("DuplicateMirrorBaseX:="), vArg2.append(Xpos)
-            vArg2.append("DuplicateMirrorBaseY:="), vArg2.append(Ypos)
-            vArg2.append("DuplicateMirrorBaseZ:="), vArg2.append(Zpos)
-            vArg2.append("DuplicateMirrorNormalX:="), vArg2.append(Xnorm)
-            vArg2.append("DuplicateMirrorNormalY:="), vArg2.append(Ynorm)
-            vArg2.append("DuplicateMirrorNormalZ:="), vArg2.append(Znorm)
-            vArg3 = ["NAME:Options", "DuplicateAssignments:=", duplicate_assignment]
+            arg_1 = ["NAME:Selections", "Selections:=", selections, "NewPartsModelFlag:=", "Model"]
+            arg_2 = [
+                "NAME:DuplicateToMirrorParameters",
+                "DuplicateMirrorBaseX:=",
+                x_pos,
+                "DuplicateMirrorBaseY:=",
+                y_pos,
+                "DuplicateMirrorBaseZ:=",
+                z_pos,
+                "DuplicateMirrorNormalX:=",
+                x_norm,
+                "DuplicateMirrorNormalY:=",
+                y_norm,
+                "DuplicateMirrorNormalZ:=",
+                z_norm,
+            ]
+            arg_3 = ["NAME:Options", "DuplicateAssignments:=", duplicate_assignment]
             if is_3d_comp:
                 orig_3d = [i for i in self.user_defined_component_names]
-            added_objs = self.oeditor.DuplicateMirror(vArg1, vArg2, vArg3)
+            added_objs = self.oeditor.DuplicateMirror(arg_1, arg_2, arg_3)
             self.add_new_objects()
             if is_3d_comp:
                 added_3d_comps = [i for i in self.user_defined_component_names if i not in orig_3d]
@@ -2889,16 +2872,23 @@ class GeometryModeler(Modeler):
                     return added_3d_comps
             return added_objs
         else:
-            vArg1 = ["NAME:Selections", "Selections:=", selections, "NewPartsModelFlag:=", "Model"]
-            vArg2 = ["NAME:MirrorParameters"]
-            vArg2.append("MirrorBaseX:="), vArg2.append(Xpos)
-            vArg2.append("MirrorBaseY:="), vArg2.append(Ypos)
-            vArg2.append("MirrorBaseZ:="), vArg2.append(Zpos)
-            vArg2.append("MirrorNormalX:="), vArg2.append(Xnorm)
-            vArg2.append("MirrorNormalY:="), vArg2.append(Ynorm)
-            vArg2.append("MirrorNormalZ:="), vArg2.append(Znorm)
-
-            self.oeditor.Mirror(vArg1, vArg2)
+            arg_1 = ["NAME:Selections", "Selections:=", selections, "NewPartsModelFlag:=", "Model"]
+            arg_2 = [
+                "NAME:MirrorParameters",
+                "MirrorBaseX:=",
+                x_pos,
+                "MirrorBaseY:=",
+                y_pos,
+                "MirrorBaseZ:=",
+                z_pos,
+                "MirrorNormalX:=",
+                x_norm,
+                "MirrorNormalY:=",
+                y_norm,
+                "MirrorNormalZ:=",
+                z_norm,
+            ]
+            self.oeditor.Mirror(arg_1, arg_2)
             return True
 
     @pyaedt_function_handler(objid="assignment")
@@ -2920,20 +2910,24 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Move
         """
-        Xvec, Yvec, Zvec = self._pos_with_arg(vector)
-        szSelections = self.convert_to_selections(assignment)
+        x_vec, y_vec, z_vec = self._pos_with_arg(vector)
+        selections = self.convert_to_selections(assignment)
 
-        vArg1 = ["NAME:Selections", "Selections:=", szSelections, "NewPartsModelFlag:=", "Model"]
-        vArg2 = ["NAME:TranslateParameters"]
-        vArg2.append("TranslateVectorX:="), vArg2.append(Xvec)
-        vArg2.append("TranslateVectorY:="), vArg2.append(Yvec)
-        vArg2.append("TranslateVectorZ:="), vArg2.append(Zvec)
+        arg_1 = ["NAME:Selections", "Selections:=", selections, "NewPartsModelFlag:=", "Model"]
+        arg_2 = [
+            "NAME:TranslateParameters",
+            "TranslateVectorX:=",
+            x_vec,
+            "TranslateVectorY:=",
+            y_vec,
+            "TranslateVectorZ:=",
+            z_vec,
+        ]
 
         if self.oeditor is not None:
-            self.oeditor.Move(vArg1, vArg2)
+            self.oeditor.Move(arg_1, arg_2)
         return True
 
     @pyaedt_function_handler(objid="assignment", cs_axis="axis", nclones="clones")
@@ -2973,7 +2967,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.DuplicateAroundAxis
         """
         selections = self.convert_to_selections(assignment)
@@ -3046,22 +3039,28 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.DuplicateAlongLine
         """
         selections = self.convert_to_selections(assignment)
-        Xpos, Ypos, Zpos = self._pos_with_arg(vector)
+        x_pos, y_pos, z_pos = self._pos_with_arg(vector)
 
-        vArg1 = ["NAME:Selections", "Selections:=", selections, "NewPartsModelFlag:=", "Model"]
-        vArg2 = ["NAME:DuplicateToAlongLineParameters"]
-        vArg2.append("CreateNewObjects:="), vArg2.append(not attach)
-        vArg2.append("XComponent:="), vArg2.append(Xpos)
-        vArg2.append("YComponent:="), vArg2.append(Ypos)
-        vArg2.append("ZComponent:="), vArg2.append(Zpos)
-        vArg2.append("Numclones:="), vArg2.append(str(clones))
-        vArg3 = ["NAME:Options", "DuplicateAssignments:=", duplicate_assignment]
+        arg_1 = ["NAME:Selections", "Selections:=", selections, "NewPartsModelFlag:=", "Model"]
+        arg_2 = [
+            "NAME:DuplicateToAlongLineParameters",
+            "CreateNewObjects:=",
+            not attach,
+            "XComponent:=",
+            x_pos,
+            "YComponent:=",
+            y_pos,
+            "ZComponent:=",
+            z_pos,
+            "Numclones:=",
+            str(clones),
+        ]
+        arg_3 = ["NAME:Options", "DuplicateAssignments:=", duplicate_assignment]
         self.add_new_objects()
-        self.oeditor.DuplicateAlongLine(vArg1, vArg2, vArg3)
+        self.oeditor.DuplicateAlongLine(arg_1, arg_2, arg_3)
         if is_3d_comp:
             return self._duplicate_added_components_tuple()
         if attach:
@@ -3087,7 +3086,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.ThickenSheet
         """
         selections = self.convert_to_selections(assignment)
@@ -3125,7 +3123,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.SweepFacesAlongNormal
         """
         if not isinstance(faces, list):
@@ -3182,7 +3179,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.SweepAlongVector
         """
         selections = self.convert_to_selections(assignment)
@@ -3240,7 +3236,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.SweepAlongPath
         """
         selections = self.convert_to_selections(assignment) + "," + self.convert_to_selections(sweep_object)
@@ -3285,7 +3280,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.SweepAroundAxis
         """
         selections = self.convert_to_selections(assignment)
@@ -3340,7 +3334,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Section
         """
         section_plane = GeometryOperators.cs_plane_to_plane_str(plane)
@@ -3381,7 +3374,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.SeparateBody
         """
         try:
@@ -3430,7 +3422,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Rotate
         """
         selections = self.convert_to_selections(assignment)
@@ -3466,7 +3457,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Subtract
         """
         if "keepOriginals" in kwargs:
@@ -3506,7 +3496,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Imprint
         """
         szList = self.convert_to_selections(blank_list)
@@ -3570,7 +3559,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.ImprintProjection
         """
         return self._imprint_projection(assignment, keep_originals, True)
@@ -3604,7 +3592,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.ImprintProjection
         """
         return self._imprint_projection(assignment, keep_originals, False, vector_points, distance)
@@ -3625,7 +3612,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.PurgeHistory
         """
         szList = self.convert_to_selections(assignment)
@@ -3639,7 +3625,6 @@ class GeometryModeler(Modeler):
     def get_model_bounding_box(self):
         """Retrieve the model bounding box.
 
-
         Returns
         -------
         List
@@ -3648,7 +3633,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetModelBoundingBox
         """
         bb = list(self.oeditor.GetModelBoundingBox())
@@ -3675,7 +3659,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Unite
         """
         slice = min(100, len(assignment))
@@ -3684,14 +3667,13 @@ class GeometryModeler(Modeler):
         objs_groups = []
         while remaining > 1:
             objs = assignment[:slice]
-            szSelections = self.convert_to_selections(objs)
-            vArg1 = ["NAME:Selections", "Selections:=", szSelections]
-            vArg2 = ["NAME:UniteParameters", "KeepOriginals:=", keep_originals]
+            selections = self.convert_to_selections(objs)
+            arg_1 = ["NAME:Selections", "Selections:=", selections]
+            arg_2 = ["NAME:UniteParameters", "KeepOriginals:=", keep_originals]
             if settings.aedt_version > "2022.2":
-                vArg2.append("TurnOnNBodyBoolean:=")
-                vArg2.append(True)
-            self.oeditor.Unite(vArg1, vArg2)
-            if szSelections.split(",")[0] in self.unclassified_names:  # pragma: no cover
+                arg_2 += ["TurnOnNBodyBoolean:=", True]
+            self.oeditor.Unite(arg_1, arg_2)
+            if selections.split(",")[0] in self.unclassified_names:  # pragma: no cover
                 self.logger.error("Error in uniting objects.")
                 self._odesign.Undo()
                 self.cleanup_objects()
@@ -3728,7 +3710,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Copy
         >>> oEditor.Paste
         """
@@ -3752,7 +3733,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Copy
         """
         # convert to string
@@ -3777,7 +3757,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Paste
         """
         self.add_new_objects()
@@ -3803,16 +3782,15 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Intersect
         """
         if "keeporiginal" in kwargs:
             warnings.warn("keeporiginal has been deprecated. use keep_originals.", DeprecationWarning)
             keep_originals = kwargs["keeporiginal"]
         unclassified = list(self.oeditor.GetObjectsInGroup("Unclassified"))
-        szSelections = self.convert_to_selections(assignment)
+        selections = self.convert_to_selections(assignment)
 
-        vArg1 = ["NAME:Selections", "Selections:=", szSelections]
+        vArg1 = ["NAME:Selections", "Selections:=", selections]
         vArg2 = ["NAME:IntersectParameters", "KeepOriginals:=", keep_originals]
 
         self.oeditor.Intersect(vArg1, vArg2)
@@ -3843,7 +3821,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.DetachFaces
 
         """
@@ -3876,14 +3853,13 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Connect
         """
         try:
             unclassified_before = list(self.unclassified_names)
-            szSelections = self.convert_to_selections(assignment)
-            szSelections_list = szSelections.split(",")
-            vArg1 = ["NAME:Selections", "Selections:=", szSelections]
+            selections = self.convert_to_selections(assignment)
+            selections_list = selections.split(",")
+            vArg1 = ["NAME:Selections", "Selections:=", selections]
 
             self.oeditor.Connect(vArg1)
             if unclassified_before != self.unclassified_names:  # pragma: no cover
@@ -3898,7 +3874,7 @@ class GeometryModeler(Modeler):
             objects_list_after_connection = [
                 obj
                 for obj in self.object_list
-                for sel in set(szSelections_list).intersection(self.object_names)
+                for sel in set(selections_list).intersection(self.object_names)
                 if obj.name == sel
             ]
             return objects_list_after_connection
@@ -3916,7 +3892,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Subtract
         """
         self.logger.info("Subtract all objects from Chassis object - exclude vacuum objs")
@@ -3997,7 +3972,7 @@ class GeometryModeler(Modeler):
 
         """
 
-        Xvec, Yvec, Zvec = self._pos_with_arg(face_location)
+        x_vec, y_vec, z_vec = self._pos_with_arg(face_location)
 
         if isinstance(assignment, int):
             assignment = self.objects[assignment].name
@@ -4006,13 +3981,19 @@ class GeometryModeler(Modeler):
         i = 0
         while not found:
             off1, off2, off3 = self._offset_on_plane(i, offset)
-            vArg1 = ["NAME:FaceParameters"]
-            vArg1.append("BodyName:="), vArg1.append(assignment)
-            vArg1.append("XPosition:="), vArg1.append(Xvec + "+" + self._arg_with_dim(off1))
-            vArg1.append("YPosition:="), vArg1.append(Yvec + "+" + self._arg_with_dim(off2))
-            vArg1.append("ZPosition:="), vArg1.append(Zvec + "+" + self._arg_with_dim(off3))
+            arg_1 = [
+                "NAME:FaceParameters",
+                "BodyName:=",
+                assignment,
+                "XPosition:=",
+                x_vec + "+" + self._arg_with_dim(off1),
+                "YPosition:=",
+                y_vec + "+" + self._arg_with_dim(off2),
+                "ZPosition:=",
+                z_vec + "+" + self._arg_with_dim(off3),
+            ]
             try:
-                face_id = self.oeditor.GetFaceByPosition(vArg1)
+                _ = self.oeditor.GetFaceByPosition(arg_1)
                 if i < 4:
                     plane = "XY"
                 elif i < 8:
@@ -4044,7 +4025,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetMatchedObjectName
         """
         return self.oeditor.GetMatchedObjectName(search_string)
@@ -4065,7 +4045,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.RenamePart
         """
         cad_suffix = main_part_name + "_"
@@ -4104,7 +4083,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateBox
         """
         self.logger.info("Adding Airbox to the Bounding ")
@@ -4165,7 +4143,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateRegion
         """
         return self.create_region(pad_percent=[x_pos, x_neg, y_pos, y_neg, z_pos, z_neg], is_percentage=is_percentage)
@@ -4187,7 +4164,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.ChangeProperty
         """
         arg = ["NAME:AllTabs"]
@@ -4224,7 +4200,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateEntityList
         """
         if name:
@@ -4264,7 +4239,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateEntityList
         """
         if name:
@@ -4302,7 +4276,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GenerateHistory
         """
         assignment = self.convert_to_selections(assignment)
@@ -4421,12 +4394,12 @@ class GeometryModeler(Modeler):
         P = self.get_existing_polyline(assignment=new_edges[0])
 
         if edge_to_delete:
-            P.remove_edges(edge_to_delete)
+            P.remove_segments(edge_to_delete)
 
         angle = math.pi * (180 - 360 / number_of_segments) / 360
 
         status = P.set_crosssection_properties(
-            type="Circle", num_seg=number_of_segments, width=(rad * (2 - math.sin(angle))) * 2
+            section="Circle", width=(rad * (2 - math.sin(angle))) * 2, num_seg=number_of_segments
         )
         if status:
             self.move(new_edges[0], move_vector)
@@ -4451,7 +4424,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetEntityListIDByName
         """
         id = self.oeditor.GetEntityListIDByName(name)
@@ -4497,7 +4469,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Subtract
         >>> oEditor.PurgeHistory
         """
@@ -4589,7 +4560,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetModelBoundingBox
         """
         oBoundingBox = list(self.oeditor.GetModelBoundingBox())
@@ -4615,14 +4585,13 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetEdgeIDsFromObject
         """
-        for object in self.solid_names + self.sheet_names + self.line_names:
+        for obj in self.solid_names + self.sheet_names + self.line_names:
             try:
-                oEdgeIDs = self.oeditor.GetEdgeIDsFromObject(object)
+                oEdgeIDs = self.oeditor.GetEdgeIDsFromObject(obj)
                 if str(assignment) in oEdgeIDs:
-                    return object
+                    return obj
             except Exception:
                 return False
         return False
@@ -4638,7 +4607,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetModelBoundingBox
         """
         bound = self.get_model_bounding_box()
@@ -4687,7 +4655,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetVertexIDsFromObject
         """
         position_list = []
@@ -4753,7 +4720,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Export
         """
 
@@ -4876,7 +4842,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Import
         """
         if str(healing) in ["0", "1"]:
@@ -4929,7 +4894,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateUserDefinedModel
         """
         env_var = os.environ
@@ -5150,7 +5114,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateUserDefinedModel
         """
         if is_linux:  # pragma: no cover
@@ -5263,7 +5226,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.BreakUDMConnection
         """
         args = ["NAME:Selections", "Selections:=", "SpaceClaim1"]
@@ -5287,7 +5249,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateUserDefinedModel
         >>> oEditor.BreakUDMConnection
         """
@@ -5312,7 +5273,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetObjectsByMaterial
         >>> oEditor.GetFaceIDs
         """
@@ -5354,7 +5314,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Scale
         """
         selections = self.convert_to_selections(assignment, True)
@@ -5379,7 +5338,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetFaceIDs
         """
         self.logger.info("Selecting outer faces.")
@@ -5404,11 +5362,10 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.SetPropertyValue
         """
-        oObjects = list(self.oeditor.GetObjectsInGroup("Solids"))
-        for obj in oObjects:
+        objects = list(self.oeditor.GetObjectsInGroup("Solids"))
+        for obj in objects:
             pro = self.oeditor.GetPropertyValue("Geometry3DAttributeTab", obj, "Material")
             if pro == '""':
                 self.oeditor.SetPropertyValue("Geometry3DAttributeTab", obj, "Model", False)
@@ -5441,7 +5398,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.ThickenSheet
         """
         aedt_bounding_box = self.get_model_bounding_box()
@@ -5540,7 +5496,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.MoveFaces
 
         """
@@ -5601,7 +5556,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.MoveEdges
 
         """
@@ -5669,7 +5623,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateGroup
         """
         if components is None and groups is None and objects is None:
@@ -5733,7 +5686,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Ungroup
         """
         group_list = self.convert_to_selections(groups, return_list=True)
@@ -5752,7 +5704,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.FlattenGroup
         """
         self.oeditor.FlattenGroup(["Groups:=", ["Model"]])
@@ -5761,6 +5712,7 @@ class GeometryModeler(Modeler):
     @pyaedt_function_handler(sheet_name="sheet", object_name="object")
     def wrap_sheet(self, sheet, object, imprinted=False):
         """Execute the sheet wrapping around an object.
+
         If wrapping produces an unclassified operation it will be reverted.
 
         Parameters
@@ -6145,7 +6097,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateBox
 
         Examples
@@ -6217,7 +6168,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateBox
 
         Examples
@@ -6508,7 +6458,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateRegion
         """
         if name is None:
@@ -6535,7 +6484,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateRegion
         """
         is_percentage = region.padding_types in ["Percentage Offset", "Transverse Percentage Offset"]
@@ -6657,7 +6605,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateRegion
         """
         # backward compatibility
@@ -6698,7 +6645,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateObjectFromFaces
         """
         edge_ids = self.convert_to_selections(assignment, True)
@@ -6748,7 +6694,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateObjectFromFaces
         """
         face_ids = self.convert_to_selections(assignment, True)
@@ -6914,7 +6859,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreatePolyline
 
         Examples
@@ -7119,7 +7063,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateUserDefinedPart
 
         Examples
@@ -7177,7 +7120,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.CreateUserDefinedPart
 
         Examples
@@ -7226,7 +7168,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Delete
 
         """
@@ -7283,7 +7224,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.Delete
 
         """
@@ -7640,7 +7580,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetFaceIDs
 
         """
@@ -7671,7 +7610,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetEdgeIDsFromObject
 
         """
@@ -7701,7 +7639,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetEdgeIDsFromFace
 
         """
@@ -7725,7 +7662,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetVertexIDsFromObject
 
         """
@@ -7757,7 +7693,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetVertexIDsFromFace
 
         """
@@ -7810,7 +7745,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetVertexIDsFromEdge
 
         """
@@ -7838,7 +7772,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetVertexPosition
 
         """
@@ -7866,7 +7799,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetFaceArea
 
         """
@@ -7891,7 +7823,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetFaceCenter
 
         """
@@ -7993,19 +7924,23 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetBodyNamesByPosition
 
         """
         if not isinstance(position, (self.Position, list)):
             # self.logger.error("A list of point has to be provided")
             return []
-        XCenter, YCenter, ZCenter = self._pos_with_arg(position, units)
-        vArg1 = ["NAME:Parameters"]
-        vArg1.append("XPosition:="), vArg1.append(XCenter)
-        vArg1.append("YPosition:="), vArg1.append(YCenter)
-        vArg1.append("ZPosition:="), vArg1.append(ZCenter)
-        list_of_bodies = list(self.oeditor.GetBodyNamesByPosition(vArg1))
+        x_center, y_center, z_center = self._pos_with_arg(position, units)
+        arg_1 = [
+            "NAME:Parameters",
+            "XPosition:=",
+            x_center,
+            "YPosition:=",
+            y_center,
+            "ZPosition:=",
+            z_center,
+        ]
+        list_of_bodies = list(self.oeditor.GetBodyNamesByPosition(arg_1))
         if not include_non_model:
             non_models = [i for i in self.non_model_objects]
             list_of_bodies = [i for i in list_of_bodies if i not in non_models]
@@ -8036,21 +7971,27 @@ class GeometryModeler(Modeler):
         else:
             object_list = self.object_names
 
-        edgeID = -1
-        XCenter, YCenter, ZCenter = self._pos_with_arg(position, units)
+        edge_id = -1
+        x_center, y_center, z_center = self._pos_with_arg(position, units)
 
-        vArg1 = ["NAME:EdgeParameters"]
-        vArg1.append("BodyName:="), vArg1.append("")
-        vArg1.append("XPosition:="), vArg1.append(XCenter)
-        vArg1.append("YPosition:="), vArg1.append(YCenter)
-        vArg1.append("ZPosition:="), vArg1.append(ZCenter)
+        arg_1 = [
+            "NAME:EdgeParameters",
+            "BodyName:=",
+            "",
+            "XPosition:=",
+            x_center,
+            "YPosition:=",
+            y_center,
+            "ZPosition:=",
+            z_center,
+        ]
         for obj in object_list:
-            vArg1[2] = obj
+            arg_1[2] = obj
             try:
-                edgeID = int(self.oeditor.GetEdgeByPosition(vArg1))
-                return edgeID
+                edge_id = int(self.oeditor.GetEdgeByPosition(arg_1))
+                return edge_id
             except Exception:
-                pass
+                self.logger.debug(f"Cannot retrieve edge id from {obj}")
 
     @pyaedt_function_handler(vertexid="vertex", obj_name="assignment")
     def get_edgeids_from_vertexid(self, vertex, assignment):
@@ -8070,19 +8011,18 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetEdgeIDsFromObject
         >>> oEditor.GetVertexIDsFromEdge
 
         """
-        edgeID = []
+        edge_ids = []
         edges = self.get_object_edges(assignment)
         for edge in edges:
             vertices = self.get_edge_vertices(edge)
             if vertex in vertices:
-                edgeID.append(edge)
+                edge_ids.append(edge)
 
-        return edgeID
+        return edge_ids
 
     @pyaedt_function_handler(obj_name="assignment")
     def get_faceid_from_position(self, position, assignment=None, units=None):
@@ -8106,7 +8046,6 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.GetFaceByPosition
 
         """
@@ -8115,20 +8054,25 @@ class GeometryModeler(Modeler):
         else:
             object_list = self.object_names
 
-        XCenter, YCenter, ZCenter = self._pos_with_arg(position, units)
-        vArg1 = ["NAME:FaceParameters"]
-        vArg1.append("BodyName:="), vArg1.append("")
-        vArg1.append("XPosition:="), vArg1.append(XCenter)
-        vArg1.append("YPosition:="), vArg1.append(YCenter)
-        vArg1.append("ZPosition:="), vArg1.append(ZCenter)
+        x_center, y_center, z_center = self._pos_with_arg(position, units)
+        arg_1 = [
+            "NAME:FaceParameters",
+            "BodyName:=",
+            "",
+            "XPosition:=",
+            x_center,
+            "YPosition:=",
+            y_center,
+            "ZPosition:=",
+            z_center,
+        ]
         for obj in object_list:
-            vArg1[2] = obj
+            arg_1[2] = obj
             try:
-                face_id = self.oeditor.GetFaceByPosition(vArg1)
+                face_id = self.oeditor.GetFaceByPosition(arg_1)
                 return face_id
             except Exception:
-                # Not Found, keep looking
-                pass
+                self.logger.debug(f"Cannot retrieve face id from {obj}")
 
     @pyaedt_function_handler(sheets="assignment", tol="tolerance")
     def get_edges_on_bounding_box(self, assignment, return_colinear=True, tolerance=1e-6):
@@ -8625,60 +8569,65 @@ class GeometryModeler(Modeler):
         else:
             return default_material, True
 
+    # TODO: Checks should be performed to check if all objects values are really reachable
+    @pyaedt_function_handler()
+    def __refresh_object_type(self, object_type: str):
+        ALLOWED_TYPES = ["Solids", "Sheets", "Lines", "Unclassified"]
+        OBJECT_TYPE_TO_ATTRIBUTE = {
+            "Solids": "_solids",
+            "Sheets": "_sheets",
+            "Lines": "_lines",
+            "Unclassified": "_unclassified",
+        }
+
+        if object_type not in ALLOWED_TYPES:
+            raise ValueError(f"Object type {object_type} is not allowed.")
+
+        try:
+            objects = self.oeditor.GetObjectsInGroup(object_type)
+        except (TypeError, AttributeError):
+            objects = []
+        # TODO: To be checked
+        if objects is False:
+            raise RuntimeError(f"Get {object_type.lower()} is failing")
+        # TODO: To be checked (in IronPython True is supposed to be returned when no solids are present)
+        elif objects is True or objects is None:
+            setattr(
+                self, OBJECT_TYPE_TO_ATTRIBUTE[object_type], []
+            )  # In IronPython True is returned when no solids are present
+        else:
+            setattr(self, OBJECT_TYPE_TO_ATTRIBUTE[object_type], list(objects))
+        self._all_object_names = self._solids + self._sheets + self._lines + self._points
+
     @pyaedt_function_handler()
     def _refresh_solids(self):
-        try:
-            test = self.oeditor.GetObjectsInGroup("Solids")
-        except (TypeError, AttributeError):
-            test = []
-        if test is False:
-            assert False, "Get Solids is failing"
-        elif test is True or test is None:
-            self._solids = []  # In IronPython True is returned when no sheets are present
-        else:
-            self._solids = list(test)
-        self._all_object_names = self._solids + self._sheets + self._lines + self._points
+        self.__refresh_object_type("Solids")
 
     @pyaedt_function_handler()
     def _refresh_sheets(self):
-        try:
-            test = self.oeditor.GetObjectsInGroup("Sheets")
-        except (TypeError, AttributeError):
-            test = []
-        if test is False:
-            assert False, "Get Sheets is failing"
-        elif test is True or test is None:
-            self._sheets = []  # In IronPython True is returned when no sheets are present
-        else:
-            self._sheets = list(test)
-        self._all_object_names = self._solids + self._sheets + self._lines + self._points
+        self.__refresh_object_type("Sheets")
 
     @pyaedt_function_handler()
     def _refresh_lines(self):
-        try:
-            test = self.oeditor.GetObjectsInGroup("Lines")
-        except (TypeError, AttributeError):
-            test = []
-        if test is False:
-            assert False, "Get Lines is failing"
-        elif test is True or test is None:
-            self._lines = []  # In IronPython True is returned when no lines are present
-        else:
-            self._lines = list(test)
-        self._all_object_names = self._solids + self._sheets + self._lines + self._points
+        self.__refresh_object_type("Lines")
 
+    @pyaedt_function_handler()
+    def _refresh_unclassified(self):
+        self.__refresh_object_type("Unclassified")
+
+    # TODO: Checks should be performed to check if all objects values are really reachable
     @pyaedt_function_handler()
     def _refresh_points(self):
         try:
-            test = self.oeditor.GetPoints()
+            objects = self.oeditor.GetPoints()
         except (TypeError, AttributeError):
-            test = []
-        if test is False:
-            assert False, "Get Points is failing"
-        elif test is True or test is None:
+            objects = []
+        if objects is False:
+            raise RuntimeError(f"Get points is failing")
+        elif objects is True or objects is None:
             self._points = []  # In IronPython True is returned when no points are present
         else:
-            self._points = list(test)
+            self._points = list(objects)
         self._all_object_names = self._solids + self._sheets + self._lines + self._points
 
     @pyaedt_function_handler()
@@ -8692,20 +8641,6 @@ class GeometryModeler(Modeler):
         except (TypeError, AttributeError):
             self._planes = {}
         self._all_object_names = self._solids + self._sheets + self._lines + self._points + list(self._planes.keys())
-
-    @pyaedt_function_handler()
-    def _refresh_unclassified(self):
-        try:
-            test = self.oeditor.GetObjectsInGroup("Unclassified")
-        except (TypeError, AttributeError):
-            test = []
-        if test is None or test is False:
-            self._unclassified = []
-            self.logger.debug("Unclassified is failing")
-        elif test is True:
-            self._unclassified = []  # In IronPython True is returned when no unclassified are present
-        else:
-            self._unclassified = list(test)
 
     @pyaedt_function_handler()
     def _refresh_object_types(self):
@@ -8731,16 +8666,16 @@ class GeometryModeler(Modeler):
             self.planes[name] = o
         elif name in line_names:
             o = Object3d(self, name)
+            o.is_polyline = True
             if pid:
                 new_id = pid
             else:
                 new_id = o.id
-            o = self.get_existing_polyline(o)
             self.objects[new_id] = o
+
         else:
             o = Object3d(self, name)
-            if is_polyline:
-                o = self.get_existing_polyline(o)
+            o.is_polyline = is_polyline
             if pid:
                 new_id = pid
             else:
@@ -8849,8 +8784,8 @@ class GeometryModeler(Modeler):
             section_bend = "Corner"
 
         # Ensure number-of segments is valid
-        if num_seg:
-            assert num_seg > 2, "Number of segments for a cross-section must be 0 or greater than 2."
+        if num_seg and num_seg < 3:
+            self.logger.error("Number of segments for a cross-section must be 0 or greater than 2")
 
         model_units = self.model_units
         arg_str += ["XSectionType:=", section_type]
@@ -8879,17 +8814,17 @@ class GeometryModeler(Modeler):
 
     @pyaedt_function_handler()
     def _pos_with_arg(self, pos, units=None):
-        xpos = self._arg_with_dim(pos[0], units)
+        x_pos = self._arg_with_dim(pos[0], units)
         if len(pos) < 2:
-            ypos = self._arg_with_dim(0, units)
+            y_pos = self._arg_with_dim(0, units)
         else:
-            ypos = self._arg_with_dim(pos[1], units)
+            y_pos = self._arg_with_dim(pos[1], units)
         if len(pos) < 3:
-            zpos = self._arg_with_dim(0, units)
+            z_pos = self._arg_with_dim(0, units)
         else:
-            zpos = self._arg_with_dim(pos[2], units)
+            z_pos = self._arg_with_dim(pos[2], units)
 
-        return xpos, ypos, zpos
+        return x_pos, y_pos, z_pos
 
     @pyaedt_function_handler()
     def _str_list(self, theList):
@@ -9007,12 +8942,10 @@ class GeometryModeler(Modeler):
 
         References
         ----------
-
         >>> oEditor.ChangeProperty
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> aedtapp = Hfss()
         >>> edge_object = aedtapp.modeler.create_object_from_edge("my_edge")

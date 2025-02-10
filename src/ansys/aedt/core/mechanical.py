@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
+# Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
 #
@@ -27,6 +27,8 @@
 from __future__ import absolute_import  # noreorder
 
 from ansys.aedt.core.application.analysis_3d import FieldAnalysis3D
+from ansys.aedt.core.generic.constants import SOLUTIONS
+from ansys.aedt.core.generic.errors import AEDTRuntimeError
 from ansys.aedt.core.generic.general_methods import generate_unique_name
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.modules.boundary.common import BoundaryObject
@@ -213,17 +215,17 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignEMLoss
         """
+        if self.solution_type not in (SOLUTIONS.Mechanical.Thermal, SOLUTIONS.Mechanical.SteadyStateThermal):
+            raise AEDTRuntimeError("This method works only in a Mechanical Thermal analysis.")
+
         if surface_objects is None:
             surface_objects = []
         if parameters is None:
             parameters = []
         if assignment is None:
             assignment = []
-
-        assert "Thermal" in self.solution_type, "This method works only in a Mechanical Thermal analysis."
 
         self.logger.info("Mapping HFSS EM Loss")
         oName = self.project_name
@@ -237,7 +239,7 @@ class Mechanical(FieldAnalysis3D, object):
         if not assignment:
             allObjects = self.modeler.object_names
         else:
-            allObjects = assignment[:]
+            allObjects = surface_objects + assignment[:]
         surfaces = surface_objects
         if map_frequency:
             intr = [map_frequency]
@@ -284,7 +286,7 @@ class Mechanical(FieldAnalysis3D, object):
     )
     def assign_thermal_map(
         self,
-        object_list,
+        assignment,
         design="IcepakDesign1",
         setup="Setup1",
         sweep="SteadyState",
@@ -298,7 +300,7 @@ class Mechanical(FieldAnalysis3D, object):
 
         Parameters
         ----------
-        object_list : list
+        assignment : list
 
         design : str, optional
             Name of the design with the source mapping. The default is ``"IcepakDesign1"``.
@@ -319,13 +321,13 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignThermalCondition
         """
+        if self.solution_type != SOLUTIONS.Mechanical.Structural:
+            raise AEDTRuntimeError("This method works only in a Mechanical Structural analysis.")
+
         if parameters is None:
             parameters = []
-
-        assert self.solution_type == "Structural", "This method works only in a Mechanical Structural analysis."
 
         self.logger.info("Mapping HFSS EM Loss")
         oName = self.project_name
@@ -336,11 +338,11 @@ class Mechanical(FieldAnalysis3D, object):
         #
         # Generate a list of model objects from the lists made previously and use to map the HFSS losses into Icepak.
         #
-        object_list = self.modeler.convert_to_selections(object_list, True)
-        if not object_list:
-            allObjects = self.modeler.object_names
+        assignment = self.modeler.convert_to_selections(assignment, True)
+        if not assignment:
+            all_objects = self.modeler.object_names
         else:
-            allObjects = object_list[:]
+            all_objects = assignment[:]
         argparam = {}
         for el in self.available_variations.nominal_w_values_dict:
             argparam[el] = self.available_variations.nominal_w_values_dict[el]
@@ -349,7 +351,7 @@ class Mechanical(FieldAnalysis3D, object):
             argparam[el] = el
 
         props = {
-            "Objects": allObjects,
+            "Objects": all_objects,
             "Uniform": False,
             "Project": projname,
             "Product": "ElectronicsDesktop",
@@ -402,10 +404,10 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignConvection
         """
-        assert "Thermal" in self.solution_type, "This method works only in a Mechanical Thermal analysis."
+        if self.solution_type not in (SOLUTIONS.Mechanical.Thermal, SOLUTIONS.Mechanical.SteadyStateThermal):
+            raise AEDTRuntimeError("This method works only in a Mechanical Thermal analysis.")
 
         props = {}
         assignment = self.modeler.convert_to_selections(assignment, True)
@@ -451,10 +453,10 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignTemperature
         """
-        assert "Thermal" in self.solution_type, "This method works only in a Mechanical Thermal analysis."
+        if self.solution_type not in (SOLUTIONS.Mechanical.Thermal, SOLUTIONS.Mechanical.SteadyStateThermal):
+            raise AEDTRuntimeError("This method works only in a Mechanical Thermal analysis.")
 
         props = {}
         assignment = self.modeler.convert_to_selections(assignment, True)
@@ -497,15 +499,13 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignFrictionlessSupport
         """
-        if not (self.solution_type == "Structural" or "Modal" in self.solution_type):
-            self.logger.error("This method works only in Mechanical Structural analysis.")
-            return False
+        if self.solution_type not in (SOLUTIONS.Mechanical.Structural, SOLUTIONS.Mechanical.Modal):
+            raise AEDTRuntimeError("This method works only in a Mechanical Structural analysis.")
+
         props = {}
         assignment = self.modeler.convert_to_selections(assignment, True)
-
         if type(assignment) is list:
             if type(assignment[0]) is str:
                 props["Objects"] = assignment
@@ -542,12 +542,11 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignFixedSupport
         """
-        if not (self.solution_type == "Structural" or "Modal" in self.solution_type):
-            self.logger.error("This method works only in a Mechanical Structural analysis.")
-            return False
+        if self.solution_type not in (SOLUTIONS.Mechanical.Structural, SOLUTIONS.Mechanical.Modal):
+            raise AEDTRuntimeError("This method works only in a Mechanical Structural analysis.")
+
         props = {}
         assignment = self.modeler.convert_to_selections(assignment, True)
 
@@ -573,7 +572,6 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.GetSetups
         """
         setup_list = self.existing_analysis_setups
@@ -605,10 +603,10 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignHeatFlux
         """
-        assert "Thermal" in self.solution_type, "This method works only in a Mechanical Thermal analysis."
+        if self.solution_type not in (SOLUTIONS.Mechanical.Thermal, SOLUTIONS.Mechanical.SteadyStateThermal):
+            raise AEDTRuntimeError("This method works only in a Mechanical Thermal analysis.")
 
         props = {}
         assignment = self.modeler.convert_to_selections(assignment, True)
@@ -653,10 +651,10 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AssignHeatGeneration
         """
-        assert "Thermal" in self.solution_type, "This method works only in a Mechanical Thermal analysis."
+        if self.solution_type not in (SOLUTIONS.Mechanical.Thermal, SOLUTIONS.Mechanical.SteadyStateThermal):
+            raise AEDTRuntimeError("This method works only in a Mechanical Thermal analysis.")
 
         props = {}
         assignment = self.modeler.convert_to_selections(assignment, True)
@@ -692,7 +690,6 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.AddTwoWayCoupling
 
         Examples
@@ -747,7 +744,6 @@ class Mechanical(FieldAnalysis3D, object):
 
         References
         ----------
-
         >>> oModule.InsertSetup
 
         Examples

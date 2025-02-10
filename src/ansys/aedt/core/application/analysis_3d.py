@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
+# Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
 #
@@ -27,6 +27,7 @@ import ntpath
 import os
 
 from ansys.aedt.core.application.analysis import Analysis
+from ansys.aedt.core.generic.checks import min_aedt_version
 from ansys.aedt.core.generic.configurations import Configurations
 from ansys.aedt.core.generic.constants import unit_converter
 from ansys.aedt.core.generic.general_methods import generate_unique_name
@@ -163,16 +164,15 @@ class FieldAnalysis3D(Analysis, object):
 
         Returns
         -------
-        :class:`ansys.aedt.core.modules.mesh.Mesh` or :class:`ansys.aedt.core.modules.mesh_icepak.IcepakMesh`
+        :class:`ansys.aedt.core.modules.mesh.Mesh`
             Mesh object.
         """
         if self._mesh is None and self._odesign:
             self.logger.reset_timer()
 
             from ansys.aedt.core.modules.mesh import Mesh
-            from ansys.aedt.core.modules.mesh_icepak import IcepakMesh
 
-            self._mesh = IcepakMesh(self) if self.design_type == "Icepak" else Mesh(self)
+            self._mesh = Mesh(self)
             self.logger.info_timer("Mesh class has been initialized!")
 
         return self._mesh
@@ -225,6 +225,7 @@ class FieldAnalysis3D(Analysis, object):
         return components_dict
 
     @pyaedt_function_handler(objects="assignment", export_path="output_file")
+    @min_aedt_version("2021.2")
     def plot(
         self,
         assignment=None,
@@ -281,23 +282,20 @@ class FieldAnalysis3D(Analysis, object):
         :class:`ansys.aedt.core.generic.plot.ModelPlotter`
             Model Object.
         """
-        if self._aedt_version < "2021.2":
-            self.logger.warning("Plot is supported from AEDT 2021 R2.")
-        else:
-            return self.post.plot_model_obj(
-                objects=assignment,
-                show=show,
-                export_path=output_file,
-                plot_as_separate_objects=plot_as_separate_objects,
-                plot_air_objects=plot_air_objects,
-                force_opacity_value=force_opacity_value,
-                clean_files=clean_files,
-                view=view,
-                show_legend=show_legend,
-                dark_mode=dark_mode,
-                show_bounding=show_bounding,
-                show_grid=show_grid,
-            )
+        return self.post.plot_model_obj(
+            objects=assignment,
+            show=show,
+            export_path=output_file,
+            plot_as_separate_objects=plot_as_separate_objects,
+            plot_air_objects=plot_air_objects,
+            force_opacity_value=force_opacity_value,
+            clean_files=clean_files,
+            view=view,
+            show_legend=show_legend,
+            dark_mode=dark_mode,
+            show_bounding=show_bounding,
+            show_grid=show_grid,
+        )
 
     @pyaedt_function_handler(setup_name="setup", variation_string="variations")
     def export_mesh_stats(self, setup, variations="", mesh_path=None):
@@ -401,7 +399,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oDesign.GetPropertyValue
         """
         boundary = {"HFSS": "HfssTab", "Icepak": "Icepak", "Q3D": "Q3D", "Maxwell3D": "Maxwell3D"}
@@ -444,6 +441,7 @@ class FieldAnalysis3D(Analysis, object):
     @pyaedt_function_handler(object_list="assignment")
     def copy_solid_bodies_from(self, design, assignment=None, no_vacuum=True, no_pec=True, include_sheets=False):
         """Copy a list of objects and user defined models from one design to the active design.
+
         If user defined models are selected, the project will be saved automatically.
 
         Parameters
@@ -587,7 +585,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oEditor.Import
         """
         return self.modeler.import_3d_cad(
@@ -650,7 +647,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oEditor.Export
         """
         return self.modeler.export_3d_model(
@@ -674,7 +670,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oModule.GetAllSources
         """
         return list(self.osolution.GetAllSources())
@@ -690,7 +685,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oModule.GetAllSources
         """
         return list(self.osolution.GetAllSourceModes())
@@ -713,7 +707,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oModule.SetSourceContexts
         """
 
@@ -746,7 +739,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oEditor.AssignMaterial
 
         Examples
@@ -845,7 +837,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oEditor.GetObjectsByMaterial
         """
         if len(self.modeler.objects) != len(self.modeler.object_names):
@@ -917,7 +908,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oEditor.AssignMaterial
         """
         with open_file(material_file) as csvfile:
@@ -1060,7 +1050,9 @@ class FieldAnalysis3D(Analysis, object):
 
     @pyaedt_function_handler(component_name="components")
     def flatten_3d_components(self, components=None, purge_history=True, password=None):
-        """Flatten one or multiple 3d components in the actual layout. Each 3d Component is replaced with objects.
+        """Flatten one or multiple 3d components in the actual layout.
+
+        Each 3d Component is replaced with objects.
         This function will work only if the reference coordinate system of the 3d component is the global one.
 
         Parameters
@@ -1152,10 +1144,12 @@ class FieldAnalysis3D(Analysis, object):
         return True
 
     @pyaedt_function_handler(object_name="assignment")
+    @min_aedt_version("2023.2")
     def identify_touching_conductors(self, assignment=None):
         # type: (str) -> dict
-        """Identify all touching components and group in a dictionary. This method requires that
-        the ``pyvista`` package is installed.
+        """Identify all touching components and group in a dictionary.
+
+        This method requires that the ``pyvista`` package is installed.
 
         Parameters
         ----------
@@ -1167,10 +1161,7 @@ class FieldAnalysis3D(Analysis, object):
         dict
 
         """
-        if settings.aedt_version < "2023.2":  # pragma: no cover
-            self.logger.error("This method requires CPython and PyVista.")
-            return {}
-        if settings.aedt_version >= "2023.2" and self.design_type == "HFSS":  # pragma: no cover
+        if self.design_type == "HFSS":  # pragma: no cover
             nets_aedt = self.oboundary.IdentifyNets(True)
             nets = {}
             for net in nets_aedt[1:]:
@@ -1318,9 +1309,6 @@ class FieldAnalysis3D(Analysis, object):
         import_method : int, bool
             Whether the import method is ``Script`` or ``Acis``.
             The default is ``1``, which means that the ``Acis`` is used.
-        sheet_bodies_2d : bool, optional
-            Whether importing as 2D sheet bodies causes imported objects to
-            be organized in terms of 2D sheets. The default is ``True``.
 
         Returns
         -------
@@ -1329,7 +1317,6 @@ class FieldAnalysis3D(Analysis, object):
 
         References
         ----------
-
         >>> oEditor.ImportDXF
 
         """
@@ -1384,7 +1371,7 @@ class FieldAnalysis3D(Analysis, object):
         input_file : str
             Path to the GDS file.
         mapping_layers : dict
-            Dictionary keys are GDS layer numbers, and the value is a tuple with the thickness and elevation.
+            Dictionary keys are GDS layer numbers, and the value is a tuple with the elevation and thickness.
         units : str, optional
             Length unit values. The default is ``"um"``.
         import_method : integer, optional
@@ -1479,12 +1466,14 @@ class FieldAnalysis3D(Analysis, object):
     def _find_indices(self, list_to_check, item_to_find):
         # type: (list, str|int) -> list
         """Given a list, returns the list of indices for all occurrences of a given element.
+
         Parameters
         ----------
         list_to_check: list
             List to check.
         item_to_find: str, int
             Element to search for in the list.
+
         Returns
         -------
         list
