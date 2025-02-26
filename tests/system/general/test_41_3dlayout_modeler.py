@@ -436,6 +436,7 @@ class TestClass:
         assert sweep.set_save_fields(False, False)
 
     def test_17_get_setup(self):
+        self.aedtapp.save_project()
         setup4 = self.aedtapp.get_setup(self.aedtapp.existing_analysis_setups[0])
         setup4.props["PercentRefinementPerPass"] = 37
         setup4.props["AdaptiveSettings"]["SingleFrequencyDataList"]["AdaptiveFrequencyData"]["MaxPasses"] = 44
@@ -599,6 +600,11 @@ class TestClass:
         assert setup.export_to_q3d(file_fullname, keep_net_name=True, unite=False)
 
     def test_21_variables(self):
+        assert isinstance(self.aedtapp.available_variations.nominal_values, dict)
+        assert isinstance(self.aedtapp.available_variations.nominal, dict)
+        assert isinstance(self.aedtapp.available_variations.all, dict)
+
+        # Deprecated
         assert isinstance(self.aedtapp.available_variations.nominal_w_values_dict, dict)
         assert isinstance(self.aedtapp.available_variations.nominal_w_values, list)
 

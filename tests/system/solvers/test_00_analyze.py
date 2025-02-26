@@ -109,7 +109,8 @@ def icepak_app(add_app):
 @pytest.fixture(scope="class")
 def hfss3dl_solve(add_app):
     app = add_app(project_name=test_solve, application=Hfss3dLayout, subfolder=test_subfolder)
-    return app
+    yield app
+    app.close_project(save=False)
 
 
 @pytest.fixture(scope="class")
@@ -146,9 +147,26 @@ def m3dtransient(add_app):
 
 class TestClass:
     @pytest.fixture(autouse=True)
-    def init(self, local_scratch, icepak_app, hfss3dl_solve):
+    def init(self, local_scratch):
         self.local_scratch = local_scratch
-        self.hfss3dl_solve = hfss3dl_solve
+
+    def test_3dl_generate_mesh(self, hfss3dl_solve):
+        assert hfss3dl_solve.mesh.generate_mesh("Setup1")
+
+    @pytest.mark.skipif(desktop_version < "2023.2", reason="Working only from 2023 R2")
+    def test_3dl_analyze_setup(self, hfss3dl_solve):
+        assert hfss3dl_solve.export_touchstone_on_completion(export=False)
+        assert hfss3dl_solve.export_touchstone_on_completion(export=True)
+        if desktop_version > "2024.2":
+            assert hfss3dl_solve.set_export_touchstone()
+        else:
+            with pytest.raises(AEDTRuntimeError):
+                hfss3dl_solve.set_export_touchstone()
+        assert hfss3dl_solve.analyze_setup("Setup1", cores=4, blocking=False)
+        assert hfss3dl_solve.are_there_simulations_running
+        assert hfss3dl_solve.stop_simulations()
+        while hfss3dl_solve.are_there_simulations_running:
+            time.sleep(1)
 
     @pytest.mark.skipif(is_linux or sys.version_info < (3, 8), reason="Not supported.")
     def test_01a_sbr_link_array(self, sbr_platform, array):
@@ -164,7 +182,9 @@ class TestClass:
         solution_data = sbr_platform_solved.setups[0].get_solution_data()
 
         ffdata = sbr_platform_solved.get_antenna_data(frequencies=solution_data.intrinsics["Freq"], sphere="3D")
-        sbr_platform_solved.get_antenna_data(frequencies=solution_data.intrinsics["Freq"], sphere="3D", overwrite=False)
+        ffdata2 = sbr_platform_solved.get_antenna_data(
+            frequencies=solution_data.intrinsics["Freq"][0], sphere="3D", overwrite=False
+        )
 
         ffdata.farfield_data.plot_cut(
             quantity="RealizedGain",
@@ -177,6 +197,7 @@ class TestClass:
             output_file=os.path.join(self.local_scratch.path, "2d1_array.jpg"),
         )
         assert os.path.exists(os.path.join(self.local_scratch.path, "2d1_array.jpg"))
+        assert os.path.isfile(ffdata2.metadata_file)
 
     def test_01b_sbr_create_vrt(self, sbr_app):
         sbr_app.rename_design("vtr")
@@ -274,7 +295,7 @@ class TestClass:
         )
         assert os.path.exists(fld_file2)
         fld_file2 = os.path.join(self.local_scratch.path, "test_fld_hfss6.fld")
-        with pytest.raises(AttributeError):
+        with pytest.raises(TypeError):
             hfss_app.post.export_field_file(quantity="Mag_E", output_file=fld_file2, assignment="Box1", intrinsics=[])
         assert not os.path.exists(fld_file2)
 
@@ -373,10 +394,11 @@ class TestClass:
         assert os.path.exists(fld_file)
         fld_file_1 = os.path.join(self.local_scratch.path, "test_fld_1.fld")
         sample_points_file = os.path.join(local_path, "example_models", test_subfolder, "temp_points.pts")
+        icepak_solved.available_variations.independent = True
         icepak_solved.post.export_field_file(
             quantity="Temp",
             solution=icepak_solved.nominal_sweep,
-            variations=icepak_solved.available_variations.nominal_w_values_dict,
+            variations=icepak_solved.available_variations.nominal_values,
             output_file=fld_file_1,
             assignment="box",
             sample_points_file=sample_points_file,
@@ -386,7 +408,7 @@ class TestClass:
         icepak_solved.post.export_field_file(
             quantity="Temp",
             solution=icepak_solved.nominal_sweep,
-            variations=icepak_solved.available_variations.nominal_w_values_dict,
+            variations=icepak_solved.available_variations.nominal_values,
             output_file=fld_file_2,
             assignment="box",
             sample_points=[[0, 0, 0], [3, 6, 8], [4, 7, 9]],
@@ -397,7 +419,7 @@ class TestClass:
         icepak_solved.post.export_field_file(
             quantity="Temp",
             solution=icepak_solved.nominal_sweep,
-            variations=icepak_solved.available_variations.nominal_w_values_dict,
+            variations=icepak_solved.available_variations.nominal_values,
             output_file=fld_file_3,
             assignment="box",
             sample_points=[[0, 0, 0], [3, 6, 8], [4, 7, 9]],
@@ -406,24 +428,6 @@ class TestClass:
             export_field_in_reference=False,
         )
         assert os.path.exists(fld_file_3)
-
-    def test_04a_3dl_generate_mesh(self):
-        assert self.hfss3dl_solve.mesh.generate_mesh("Setup1")
-
-    @pytest.mark.skipif(desktop_version < "2023.2", reason="Working only from 2023 R2")
-    def test_04b_3dl_analyze_setup(self):
-        assert self.hfss3dl_solve.export_touchstone_on_completion(export=False)
-        assert self.hfss3dl_solve.export_touchstone_on_completion(export=True)
-        if desktop_version > "2024.2":
-            assert self.hfss3dl_solve.set_export_touchstone()
-        else:
-            with pytest.raises(AEDTRuntimeError):
-                self.hfss3dl_solve.set_export_touchstone()
-        assert self.hfss3dl_solve.analyze_setup("Setup1", cores=4, blocking=False)
-        assert self.hfss3dl_solve.are_there_simulations_running
-        assert self.hfss3dl_solve.stop_simulations()
-        while self.hfss3dl_solve.are_there_simulations_running:
-            time.sleep(1)
 
     def test_04c_3dl_analyze_setup(self, hfss3dl_solved):
         assert os.path.exists(hfss3dl_solved.export_profile("Setup1"))
@@ -524,10 +528,11 @@ class TestClass:
         )
         assert os.path.exists(fld_file_3)
         fld_file_4 = os.path.join(self.local_scratch.path, "test_fld_4.fld")
+        m3dtransient.available_variations.independent = True
         assert not m3dtransient.post.export_field_file(
             quantity="Mag_B",
             solution=m3dtransient.nominal_sweep,
-            variations=m3dtransient.available_variations.nominal_w_values_dict,
+            variations=m3dtransient.available_variations.nominal_values,
             output_file=fld_file_4,
             assignment="Coil_A2",
             objects_type="invalid",
