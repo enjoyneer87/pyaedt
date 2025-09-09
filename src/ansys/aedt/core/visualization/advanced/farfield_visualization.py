@@ -25,42 +25,28 @@
 import json
 import math
 import os
+from pathlib import Path
 import shutil
 import sys
-import warnings
+
+import defusedxml
+from defusedxml.ElementTree import ParseError
+import numpy as np
 
 from ansys.aedt.core.aedt_logger import pyaedt_logger as logger
 from ansys.aedt.core.generic.constants import AEDT_UNITS
+from ansys.aedt.core.generic.constants import SpeedOfLight
 from ansys.aedt.core.generic.constants import unit_converter
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import conversion_function
-from ansys.aedt.core.generic.general_methods import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.numbers import decompose_variable_value
+from ansys.aedt.core.generic.numbers_utils import decompose_variable_value
+from ansys.aedt.core.internal.checks import graphics_required
 from ansys.aedt.core.visualization.advanced.touchstone_parser import read_touchstone
 from ansys.aedt.core.visualization.plot.matplotlib import ReportPlotter
 from ansys.aedt.core.visualization.plot.matplotlib import is_notebook
 from ansys.aedt.core.visualization.plot.pyvista import ModelPlotter
 from ansys.aedt.core.visualization.plot.pyvista import get_structured_mesh
-import defusedxml
-from defusedxml.ElementTree import ParseError
-
-try:
-    import numpy as np
-except ImportError:  # pragma: no cover
-    warnings.warn(
-        "The NumPy module is required to run some functionalities of FfdSolutionData.\n"
-        "Install with \n\npip install numpy"
-    )
-    np = None
-
-try:
-    import pyvista as pv
-except ImportError:  # pragma: no cover
-    warnings.warn(
-        "The PyVista module is required to run functionalities of FfdSolutionData.\n"
-        "Install with \n\npip install pyvista"
-    )
-    pv = None
 
 defusedxml.defuse_stdlib()
 
@@ -94,7 +80,7 @@ class FfdSolutionData(object):
     --------
     >>> from ansys.aedt.core import Hfss
     >>> from ansys.aedt.core.visualization.advanced.farfield_visualization import FfdSolutionData
-    >>> app = ansys.aedt.core.Hfss(version="2025.1", design="Antenna")
+    >>> app = ansys.aedt.core.Hfss(version="2025.2", design="Antenna")
     >>> data = app.get_antenna_data()
     >>> metadata_file = data.metadata_file
     >>> app.release_desktop()
@@ -105,11 +91,13 @@ class FfdSolutionData(object):
     def __init__(
         self, input_file, frequency=None, variation=None, model_info=None, incident_power=None, touchstone_file=None
     ):
+        if isinstance(input_file, Path):
+            input_file = str(input_file)
 
-        input_file_format = os.path.basename(input_file).split(".")[1]
+        input_file_format = str(Path(input_file).suffix).strip(".")
 
         # Public
-        self.output_dir = os.path.dirname(input_file)
+        self.output_dir = str(Path(input_file).parent)
 
         if input_file_format in ["txt", "xml"]:
             if not variation:
@@ -130,10 +118,15 @@ class FfdSolutionData(object):
                 touchstone_file=touchstone_file,
             )
 
+        self.jupyter_backend = None
+        use_html_backend = os.environ.get("PYANSYS_VISUALIZER_HTML_BACKEND", "false").lower() == "true"
+        if use_html_backend:
+            self.jupyter_backend = "html"
+
         # Protected
         self._mesh = None
 
-        if not os.path.isfile(input_file):  # pragma: no cover
+        if not Path(input_file).is_file():  # pragma: no cover
             raise Exception("JSON file does not exist.")
 
         # Private
@@ -176,7 +169,7 @@ class FfdSolutionData(object):
         elements = self.metadata["element_pattern"]
         for element_name, element_props in elements.items():
             location = element_props["location"]
-            pattern_file = os.path.join(self.output_dir, element_props["file_name"])
+            pattern_file = str(Path(self.output_dir) / element_props["file_name"])
             incident_power = element_props["incident_power"]
             accepted_power = element_props["accepted_power"]
             radiated_power = element_props["radiated_power"]
@@ -239,12 +232,12 @@ class FfdSolutionData(object):
             raise Exception("Farfield information from ffd files can not be loaded.")
 
         # Load touchstone data
-        metadata_touchstone = os.path.join(self.output_dir, self.metadata.get("touchstone_file", None))
+        metadata_touchstone = Path(self.output_dir) / self.metadata.get("touchstone_file", None)
 
         if not touchstone_file:
             touchstone_file = metadata_touchstone
 
-        if touchstone_file and os.path.isfile(touchstone_file):
+        if Path(touchstone_file).exists() and Path(touchstone_file).is_file():
             self.__touchstone_data = read_touchstone(touchstone_file)
 
         required_array_keys = ["array_dimension", "component_objects", "lattice_vector", "cell_position"]
@@ -555,8 +548,7 @@ class FfdSolutionData(object):
         ph, th = np.meshgrid(data["Phi"], data["Theta"])
         ph = np.deg2rad(ph)
         th = np.deg2rad(th)
-        c = 299792458
-        k = 2 * np.pi * self.frequency / c
+        k = 2 * np.pi * self.frequency / SpeedOfLight
         kx_grid = k * np.sin(th) * np.cos(ph)
         ky_grid = k * np.sin(th) * np.sin(ph)
         kz_grid = k * np.cos(th)
@@ -637,7 +629,6 @@ class FfdSolutionData(object):
         float
             Total accepted power.
         """
-
         if self.active_s_parameters is not None:
             accepted_power = {}
             for _, element in enumerate(self.all_element_names):
@@ -748,8 +739,7 @@ class FfdSolutionData(object):
         float
             Phase shift in degrees.
         """
-        c = 299792458
-        k = (2 * math.pi * self.frequency) / c
+        k = (2 * math.pi * self.frequency) / SpeedOfLight
         a = int(a)
         b = int(b)
         theta = np.deg2rad(theta)
@@ -842,11 +832,11 @@ class FfdSolutionData(object):
         Examples
         --------
         >>> from ansys.aedt.core
-        >>> app = ansys.aedt.core.Hfss(version="2025.1", design="Antenna")
+        >>> app = ansys.aedt.core.Hfss(version="2025.2", design="Antenna")
         >>> setup_name = "Setup1 : LastAdaptive"
         >>> frequencies = [77e9]
         >>> sphere = "3D"
-        >>> data = app.get_antenna_data(frequencies,setup_name,sphere)
+        >>> data = app.get_antenna_data(frequencies, setup_name, sphere)
         >>> data.plot_contour()
 
         """
@@ -867,6 +857,8 @@ class FfdSolutionData(object):
         ph, th = np.meshgrid(data["Phi"], data["Theta"][select])
         # Convert to radians for polar plot.
         ph = np.radians(ph) if polar else ph
+        th = np.radians(th) if polar else th
+
         new = ReportPlotter()
         new.show_legend = False
         new.title = title
@@ -875,7 +867,8 @@ class FfdSolutionData(object):
             "y_label": r"$\theta$ (Degrees)",
         }
 
-        new.add_trace([data_to_plot, th, ph], 2, props)
+        new.add_trace([data_to_plot, th, ph], 1, props)
+
         _ = new.plot_contour(
             trace=0,
             polar=polar,
@@ -945,14 +938,15 @@ class FfdSolutionData(object):
         Examples
         --------
         >>> from ansys.aedt.core
-        >>> app = ansys.aedt.core.Hfss(version="2025.1", design="Antenna")
+        >>> app = ansys.aedt.core.Hfss(version="2025.2", design="Antenna")
         >>> setup_name = "Setup1 : LastAdaptive"
         >>> frequencies = [77e9]
         >>> sphere = "3D"
-        >>> data = app.get_antenna_data(frequencies,setup_name,sphere)
+        >>> data = app.get_antenna_data(frequencies, setup_name, sphere)
         >>> data.plot_cut(theta=20)
         """
-
+        if isinstance(output_file, Path):
+            output_file = str(output_file)
         data = self.combine_farfield(phi, theta)
         if quantity not in data:  # pragma: no cover
             raise Exception("Far field quantity not available.")
@@ -1051,11 +1045,11 @@ class FfdSolutionData(object):
         Examples
         --------
         >>> from ansys.aedt.core
-        >>> app = ansys.aedt.core.Hfss(version="2025.1", design="Antenna")
+        >>> app = ansys.aedt.core.Hfss(version="2025.2", design="Antenna")
         >>> setup_name = "Setup1 : LastAdaptive"
         >>> frequencies = [77e9]
         >>> sphere = "3D"
-        >>> data = app.get_antenna_data(frequencies,setup_name,sphere)
+        >>> data = app.get_antenna_data(frequencies, setup_name, sphere)
         >>> data.polar_plot_3d(theta=10)
         """
         data = self.combine_farfield(phi, theta)
@@ -1089,6 +1083,7 @@ class FfdSolutionData(object):
         return new
 
     @pyaedt_function_handler()
+    @graphics_required
     def plot_3d(
         self,
         quantity="RealizedGain",
@@ -1146,13 +1141,15 @@ class FfdSolutionData(object):
         Examples
         --------
         >>> from ansys.aedt.core
-        >>> app = ansys.aedt.core.Hfss(version="2025.1", design="Antenna")
+        >>> app = ansys.aedt.core.Hfss(version="2025.2", design="Antenna")
         >>> setup_name = "Setup1 : LastAdaptive"
         >>> frequencies = [77e9]
         >>> sphere = "3D"
-        >>> data = app.get_antenna_data(setup=setup_name,sphere=sphere)
+        >>> data = app.get_antenna_data(setup=setup_name, sphere=sphere)
         >>> data.plot_3d(quantity_format="dB10")
         """
+        import pyvista as pv
+
         if not rotation:
             rotation = np.eye(3)
         elif isinstance(rotation, (list, tuple)):  # pragma: no cover
@@ -1306,9 +1303,9 @@ class FfdSolutionData(object):
             p.add_text("Show Geometry", position=(70, 75), color=text_color, font_size=10)
 
         if output_file:
-            p.show(auto_close=True, screenshot=output_file, full_screen=True)
+            p.show(auto_close=True, screenshot=output_file, full_screen=True, jupyter_backend=self.jupyter_backend)
         elif show:  # pragma: no cover
-            p.show(auto_close=False, interactive=True)
+            p.show(auto_close=False, interactive=True, jupyter_backend=self.jupyter_backend)
         return p
 
     @pyaedt_function_handler()
@@ -1329,7 +1326,7 @@ class FfdSolutionData(object):
         for element, element_data in element_info.items():
             self.__raw_data[element] = {}
             self.__frequencies = []
-            if os.path.exists(element_data["pattern_file"]):
+            if Path(element_data["pattern_file"]).exists():
                 # Extract ports
                 with open_file(element_data["pattern_file"], "r") as reader:
                     theta = [int(i) for i in reader.readline().split()]
@@ -1435,10 +1432,10 @@ class FfdSolutionData(object):
                             if component_obj in non_array_geometry:
                                 del non_array_geometry[component_obj]
 
-                            cad_path = os.path.join(self.output_dir, model_info[component_obj][0])
-                            if os.path.exists(cad_path):
+                            cad_path = Path(self.output_dir) / model_info[component_obj][0]
+                            if cad_path.exists():
                                 model_pv.add_object(
-                                    cad_path,
+                                    str(cad_path),
                                     model_info[component_obj][1],
                                     model_info[component_obj][2],
                                     model_info[component_obj][3],
@@ -1488,10 +1485,10 @@ class FfdSolutionData(object):
             self.__model_units = first_value[3]
             model_pv.off_screen = off_screen
             for object_in in non_array_geometry.values():
-                cad_path = os.path.join(self.output_dir, object_in[0])
-                if os.path.exists(cad_path):
+                cad_path = Path(self.output_dir) / object_in[0]
+                if cad_path.exists():
                     model_pv.add_object(
-                        cad_path,
+                        str(cad_path),
                         object_in[1],
                         object_in[2],
                         object_in[3],
@@ -1657,6 +1654,9 @@ def export_pyaedt_antenna_metadata(
     """
     from ansys.aedt.core.visualization.advanced.touchstone_parser import find_touchstone_files
 
+    if isinstance(input_file, Path):
+        input_file = str(input_file)
+
     if not variation:
         variation = "Nominal"
 
@@ -1666,10 +1666,10 @@ def export_pyaedt_antenna_metadata(
     if not touchstone_file:
         touchstone_file = ""
 
-    pyaedt_metadata_file = os.path.join(output_dir, "pyaedt_antenna_metadata.json")
+    pyaedt_metadata_file = Path(output_dir) / "pyaedt_antenna_metadata.json"
     items = {"variation": variation, "element_pattern": {}, "touchstone_file": touchstone_file}
 
-    if os.path.isfile(input_file) and os.path.basename(input_file).split(".")[1] == "xml":
+    if Path(input_file).is_file() and Path(input_file).suffix == ".xml":
         # Metadata available from 2024.1
         antenna_metadata = antenna_metadata_from_xml(input_file)
 
@@ -1680,19 +1680,18 @@ def export_pyaedt_antenna_metadata(
             if ffd_files:
                 # Move ffd files to main directory
                 for ffd_file in ffd_files:
-                    output_file = os.path.join(output_dir, ffd_file)
-                    pattern_file = os.path.join(dir_path, ffd_file)
+                    output_file = Path(output_dir) / ffd_file
+                    pattern_file = Path(dir_path) / ffd_file
                     shutil.move(pattern_file, output_file)
             if sNp_files and not touchstone_file:
                 # Only one Touchstone allowed
                 sNp_name, sNp_path = next(iter(sNp_files.items()))
-                output_file = os.path.join(output_dir, sNp_name)
-                exported_touchstone_file = os.path.join(sNp_path)
+                output_file = Path(output_dir) / sNp_name
+                exported_touchstone_file = Path(sNp_path)
                 shutil.move(exported_touchstone_file, output_file)
                 items["touchstone_file"] = sNp_name
 
         for metadata in antenna_metadata:
-
             incident_power = {}
             for i_freq, i_power_value in metadata["incident_power"].items():
                 frequency = i_freq
@@ -1729,20 +1728,19 @@ def export_pyaedt_antenna_metadata(
             }
 
             items["element_pattern"][metadata["name"]] = pattern
-            pattern_file = os.path.join(output_dir, metadata["file_name"])
-            if not os.path.isfile(pattern_file):  # pragma: no cover
+            pattern_file = Path(output_dir) / metadata["file_name"]
+            if not pattern_file.is_file():  # pragma: no cover
                 return False
 
-    elif os.path.isfile(input_file) and os.path.basename(input_file).split(".")[1] == "txt":
-
+    elif Path(input_file).is_file() and Path(input_file).suffix == ".txt":
         # Find all ffd files and move them to main directory
         for dir_path, _, _ in os.walk(output_dir):
             sNp_files = find_touchstone_files(dir_path)
             if sNp_files and not touchstone_file:
                 # Only one Touchstone allowed
                 sNp_name, sNp_path = next(iter(sNp_files.items()))
-                output_file = os.path.join(output_dir, sNp_name)
-                exported_touchstone_file = os.path.join(sNp_path)
+                output_file = Path(output_dir) / sNp_name
+                exported_touchstone_file = Path(sNp_path)
                 shutil.move(exported_touchstone_file, output_file)
                 items["touchstone_file"] = sNp_name
                 break
@@ -1794,7 +1792,7 @@ def export_pyaedt_antenna_metadata(
 
     with open_file(pyaedt_metadata_file, "w") as f:
         json.dump(items, f, indent=2)
-    return pyaedt_metadata_file
+    return str(pyaedt_metadata_file)
 
 
 @pyaedt_function_handler()

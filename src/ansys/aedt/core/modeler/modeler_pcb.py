@@ -22,14 +22,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os
+from pathlib import Path
 import re
 from warnings import warn
 
-from ansys.aedt.core.generic.general_methods import generate_unique_name
-from ansys.aedt.core.generic.general_methods import get_filename_without_extension
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import get_filename_without_extension
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import inside_desktop
-from ansys.aedt.core.generic.general_methods import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.generic.settings import settings
 from ansys.aedt.core.modeler.cad.modeler import Modeler
@@ -92,7 +92,8 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
 
         References
         ----------
-        >>> oEditor = oDesign.SetActiveEditor("Layout")"""
+        >>> oEditor = oDesign.SetActiveEditor("Layout")
+        """
         return self._app.oeditor
 
     @property
@@ -134,11 +135,11 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
 
     @property
     def _edb_folder(self):
-        return os.path.join(self._app.project_path, self._app.project_name + ".aedb")
+        return Path(self._app.project_path) / (self._app.project_name + ".aedb")
 
     @property
     def _edb_file(self):
-        return os.path.join(self._edb_folder, "edb.def")
+        return Path(self._edb_folder) / "edb.def"
 
     @property
     def edb(self):
@@ -156,7 +157,7 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
             from pyedb import Edb
 
             self._edb = None
-            if os.path.exists(self._edb_file) or inside_desktop:
+            if Path(self._edb_file).exists() or inside_desktop:
                 self._edb = Edb(
                     self._edb_folder,
                     self._app.design_name,
@@ -426,12 +427,12 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         Examples
         --------
         >>> from ansys.aedt.core import Hfss3dLayout
-        >>> h3d=Hfss3dLayout(version="2021.2")
+        >>> h3d = Hfss3dLayout(version="2021.2")
         >>> h3d.modeler.layers.add_layer("TOP")
-        >>> l1=h3d.modeler.create_line("TOP",[[0,0],[100,0]],0.5)
-        >>> l2=h3d.modeler.create_line("TOP",[[100,0],[120,-35]],0.5)
-        >>> h3d.modeler.unite([l1,l2])
-        >>> h3d.modeler.colinear_heal("poly_2",0.25)
+        >>> l1 = h3d.modeler.create_line("TOP", [[0, 0], [100, 0]], 0.5)
+        >>> l2 = h3d.modeler.create_line("TOP", [[100, 0], [120, -35]], 0.5)
+        >>> h3d.modeler.unite([l1, l2])
+        >>> h3d.modeler.colinear_heal("poly_2", 0.25)
         True
         """
         if isinstance(assignment, str):
@@ -480,10 +481,10 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         Examples
         --------
         >>> from ansys.aedt.core import Hfss3dLayout
-        >>> h3d=Hfss3dLayout(version="2021.2")
+        >>> h3d = Hfss3dLayout(version="2021.2")
         >>> h3d.modeler.layers.add_layer("TOP")
-        >>> h3d.modeler.create_rectangle("TOP", [20,20],[50,50], name="rect_1")
-        >>> h3d.modeler.create_line("TOP",[[25,25],[40,40]])
+        >>> h3d.modeler.create_rectangle("TOP", [20, 20], [50, 50], name="rect_1")
+        >>> h3d.modeler.create_line("TOP", [[25, 25], [40, 40]])
         >>> out1 = h3d.modeler.expand("line_3")
         >>> print(out1)
         line_4
@@ -519,7 +520,7 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         output_dir : str, optional
             Path where the EDB is to be created. The default is ``None``, in which
             case the project directory is used.
-        name : str, optional
+        name : str or :class:`pathlib.Path`, optional
             Name of the EDB. The default is ``None``, in which
             case the board name is used.
 
@@ -535,11 +536,11 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         if not output_dir:
             output_dir = self.projdir
         if not name:
-            name = os.path.basename(input_file)
-            name = os.path.splitext(name)[0]
+            name = Path(input_file).name
+            name = Path(name).stem
 
         self._oimportexport.ImportExtracta(
-            input_file, os.path.join(output_dir, name + ".aedb"), os.path.join(output_dir, name + ".xml")
+            input_file, str(Path(output_dir) / (name + ".aedb")), str(Path(output_dir) / (name + ".xml"))
         )
         self._app.__init__(self._app.desktop_class.active_project().GetName())
         return True
@@ -572,7 +573,7 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         output_dir : str, optional
             Path where the EDB is to be created. The default is ``None``, in which
             case the project directory is used.
-        name : str, optional
+        name : str or :class:`pathlib.Path`, optional
             Name of the EDB. The default is ``None``, in which
             case the board name is used.
 
@@ -588,11 +589,11 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         if not output_dir:
             output_dir = self.projdir
         if not name:
-            name = os.path.basename(input_file)
-            name = os.path.splitext(name)[0]
+            name = Path(input_file).name
+            name = Path(name).stem
 
         self._oimportexport.ImportIPC(
-            input_file, os.path.join(output_dir, name + ".aedb"), os.path.join(output_dir, name + ".xml")
+            input_file, str(Path(output_dir) / (name + ".aedb")), str(Path(output_dir) / (name + ".xml"))
         )
         self._app.__init__(self._app.desktop_class.active_project().GetName())
         return True
@@ -648,7 +649,6 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
            String or list of the selections.
 
         """
-
         if not isinstance(assignment, list):
             assignment = [assignment]
         objnames = []
@@ -680,7 +680,6 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         ----------
         >>> oEditor.Unite
         """
-
         vArg1 = ["NAME:primitives"]
         if len(assignment) >= 2:
             assignment = self.convert_to_selections(assignment, True)
@@ -865,7 +864,6 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss3dLayout
         >>> h3d = Hfss3dLayout("myproject")
         >>> h3d.modeler.set_spice_model(assignment="A1",input_file=,subcircuit_name="SUBCK1")
@@ -955,9 +953,9 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
         ----------
         assignment : str
             Name of the component.
-        input_file : str, optional
+        input_file : str or :class:`pathlib.Path`, optional
             Full path to the model file. The default is ``None``.
-        model_name : str, optional
+        model_name : str or :class:`pathlib.Path`, optional
             Name of the model. The default is ``None``, in which case the model name is the file name without an
             extension.
 
@@ -969,20 +967,18 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss3dLayout
         >>> h3d = Hfss3dLayout("myproject")
-        >>> h3d.modeler.set_touchstone_model(assignment="C1",input_file="comp.s2p")
+        >>> h3d.modeler.set_touchstone_model(assignment="C1", input_file="comp.s2p")
 
         """
-
         if not model_name:
-            model_name = os.path.splitext(os.path.basename(input_file))[0]
+            model_name = Path(Path(input_file).name).stem
             if "." in model_name:
                 model_name = model_name.replace(".", "_")
         if model_name in list(self.omodel_manager.GetNames()):
             model_name = generate_unique_name(model_name, n=2)
-        num_terminal = int(os.path.splitext(input_file)[1].lower().strip(".sp"))
+        num_terminal = int(Path(input_file).suffix.lower().strip(".sp"))
 
         port_names = []
         with open_file(input_file, "r") as f:
@@ -1019,7 +1015,7 @@ class Modeler3DLayout(Modeler, Primitives3DLayout):
             ["NAME:PortInfoBlk"],
             ["NAME:PortOrderBlk"],
             "filename:=",
-            input_file,
+            str(input_file),
             "numberofports:=",
             num_terminal,
             "sssfilename:=",

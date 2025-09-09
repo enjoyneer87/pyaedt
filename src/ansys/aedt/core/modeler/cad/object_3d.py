@@ -34,22 +34,22 @@ objects (points, lines, sheets, and solids) within the AEDT 3D Modeler.
 """
 
 import math
-import os
+from pathlib import Path
 import re
 
-from ansys.aedt.core.generic.checks import min_aedt_version
 from ansys.aedt.core.generic.constants import AEDT_UNITS
-from ansys.aedt.core.generic.constants import PLANE
+from ansys.aedt.core.generic.constants import Plane
 from ansys.aedt.core.generic.constants import unit_converter
-from ansys.aedt.core.generic.errors import AEDTRuntimeError
+from ansys.aedt.core.generic.file_utils import _uname
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import _to_boolean
-from ansys.aedt.core.generic.general_methods import _uname
 from ansys.aedt.core.generic.general_methods import clamp
-from ansys.aedt.core.generic.general_methods import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.generic.general_methods import rgb_color_codes
 from ansys.aedt.core.generic.general_methods import settings
-from ansys.aedt.core.generic.numbers import decompose_variable_value
+from ansys.aedt.core.generic.numbers_utils import decompose_variable_value
+from ansys.aedt.core.internal.checks import min_aedt_version
+from ansys.aedt.core.internal.errors import AEDTRuntimeError
 from ansys.aedt.core.modeler.cad.elements_3d import BinaryTreeNode
 from ansys.aedt.core.modeler.cad.elements_3d import EdgePrimitive
 from ansys.aedt.core.modeler.cad.elements_3d import FacePrimitive
@@ -76,7 +76,7 @@ class Object3d(object):
 
     Create a part, such as box, to return an :class:`ansys.aedt.core.modeler.cad.object_3d.Object3d`.
 
-    >>> id = prim.create_box([0, 0, 0],[10, 10, 5],"Mybox","Copper")
+    >>> id = prim.create_box([0, 0, 0], [10, 10, 5], "Mybox", "Copper")
     >>> part = prim[id]
     """
 
@@ -108,6 +108,7 @@ class Object3d(object):
         self._faces = []
         self._face_ids = []
         self._is_polyline = None
+        self._object_type = ""
 
     @property
     def is_polyline(self):
@@ -184,11 +185,11 @@ class Object3d(object):
 
         """
         tmp_path = self._primitives._app.working_directory
-        filename = os.path.join(tmp_path, self.name + ".sat")
+        filename = Path(tmp_path) / (self.name + ".sat")
 
         self._primitives._app.export_3d_model(self.name, tmp_path, ".sat", [self.name])
 
-        if not os.path.isfile(filename):
+        if not Path(filename).is_file():
             raise Exception(f"Cannot export the ACIS SAT file for object {self.name}")
 
         with open_file(filename, "r") as fh:
@@ -212,7 +213,7 @@ class Object3d(object):
             return False
 
         try:
-            os.remove(filename)
+            Path(filename).unlink()
         except Exception:
             self.logger.warning("ERROR: Cannot remove temp file.")
         return bb
@@ -309,7 +310,7 @@ class Object3d(object):
 
         Parameters
         ----------
-        output_file : str, optional
+        output_file : str or :class:`pathlib.Path`, optional
             File name with full path. If `None` the exported image will be a ``png`` file that
             will be saved in ``working_directory``.
             To access the ``working_directory`` the use ``app.working_directory`` property.
@@ -320,7 +321,7 @@ class Object3d(object):
             File path.
         """
         if not output_file:
-            output_file = os.path.join(self._primitives._app.working_directory, self.name + ".png")
+            output_file = Path(self._primitives._app.working_directory) / (self.name + ".png")
         model_obj = self._primitives._app.post.plot_model_obj(
             objects=[self.name],
             show=False,
@@ -874,7 +875,6 @@ class Object3d(object):
         >>> oEditor.ChangeProperty
 
         """
-
         if not list(self._oeditor.GetObjectsInGroup(name)):
             self._oeditor.CreateGroup(
                 [
@@ -1135,7 +1135,7 @@ class Object3d(object):
 
         Examples
         --------
-        >>> part.color = (255,255,0)
+        >>> part.color = (255, 255, 0)
 
         """
         if self._color is not None:
@@ -1478,7 +1478,7 @@ class Object3d(object):
         Parameters
         ----------
         plane : str
-            Coordinate plane of the cut or the Application.PLANE object.
+            Coordinate plane of the cut.
             Choices for the coordinate plane are ``"XY"``, ``"YZ"``, and ``"ZX"``.
         sides : str, optional
             Which side to keep. Options are ``"Both"``, ``"PositiveOnly"``,
@@ -1533,7 +1533,7 @@ class Object3d(object):
         Parameters
         ----------
         axis : int
-            Coordinate system axis or the Application.AXIS object.
+            Coordinate system axis or value of the :class:`ansys.aedt.core.generic.constants.Axis` enum.
         angle : float, optional
             Angle of rotation. The units, defined by ``unit``, can be either
             degrees or radians. The default is ``90.0``.
@@ -1584,7 +1584,7 @@ class Object3d(object):
 
         Parameters
         ----------
-        axis : Application.AXIS object
+        axis : :class:`ansys.aedt.core.generic.constants.Axis`
             Coordinate system axis of the object.
         angle : float
             Angle of rotation in degrees. The default is ``90``.
@@ -1702,7 +1702,7 @@ class Object3d(object):
 
         Parameters
         ----------
-        axis : :class:`ansys.aedt.core.generic.constants.AXIS`
+        axis : :class:`ansys.aedt.core.generic.constants.Axis`
             Coordinate system of the axis.
         sweep_angle : float, optional
              Sweep angle in degrees. The default is ``360``.
@@ -1728,8 +1728,8 @@ class Object3d(object):
 
         Parameters
         ----------
-        plane : from ansys.aedt.core.generic.constants.PLANE
-            Coordinate system of the plane object. Application.PLANE object
+        plane : from ansys.aedt.core.generic.constants.Plane
+            Coordinate system of the plane object.
         create_new : bool, optional
             Whether to create an object. The default is ``True``.
         section_cross_object : bool, optional
@@ -1854,7 +1854,7 @@ class Object3d(object):
         """
         arg = ["NAME:Selections", "Selections:=", self._m_name]
         self._oeditor.Delete(arg)
-        self._primitives.cleanup_objects()
+        del self._primitives.objects[self._m_name]
         self.__dict__ = {}
 
     @pyaedt_function_handler()
@@ -1876,7 +1876,6 @@ class Object3d(object):
         list[:class:`ansys.aedt.core.modeler.cad.elements_3d.FacePrimitive`]
             List of face primitives.
         """
-
         filters = ["==", "<=", ">=", "<", ">"]
         if area_filter not in filters:
             raise ValueError('Symbol not valid, enter one of the following: "==", "<=", ">=", "<", ">"')
@@ -2537,7 +2536,7 @@ class Object3d(object):
         tolerance when searching for the vertex to be removed.
 
         >>> P = modeler.create_polyline([[0, 1, 2], [0, 2, 3], [2, 1, 4]])
-        >>> P.remove_point(["0mm", "1mm", "2mm"],tolerance=1e-6)
+        >>> P.remove_point(["0mm", "1mm", "2mm"], tolerance=1e-6)
         """
         if not self.is_polyline:
             self.logger.error("Method remove_point applies only to Polyline objects.")
@@ -2689,7 +2688,7 @@ class Object3d(object):
         Examples
         --------
         >>> P = modeler.create_polyline([[0, 1, 2], [0, 2, 3], [2, 1, 4]])
-        >>> P.set_crosssection_properties(section="Circle",width="1mm")
+        >>> P.set_crosssection_properties(section="Circle", width="1mm")
 
         """
         if not self.is_polyline:
@@ -3050,11 +3049,11 @@ class PolylineSegment(object):
                 raise ValueError("Arc center must be a list of length 3.")
             self.arc_center = arc_center
         if isinstance(arc_plane, int):
-            if arc_plane == PLANE.XY:
+            if arc_plane == Plane.XY:
                 self.arc_plane = "XY"
-            elif arc_plane == PLANE.ZX:
+            elif arc_plane == Plane.ZX:
                 self.arc_plane = "ZX"
-            elif arc_plane == PLANE.YZ:
+            elif arc_plane == Plane.YZ:
                 self.arc_plane = "YZ"
             else:
                 raise ValueError("arc_plane must be 0, 1, or 2 ")

@@ -25,14 +25,16 @@
 
 import copy
 import os
+import warnings
 
 from ansys.aedt.core.generic.constants import LineStyle
 from ansys.aedt.core.generic.constants import SymbolStyle
 from ansys.aedt.core.generic.constants import TraceType
-from ansys.aedt.core.generic.general_methods import generate_unique_name
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import write_configuration_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.general_methods import write_configuration_file
-from ansys.aedt.core.generic.numbers import _units_assignment
+from ansys.aedt.core.generic.numbers_utils import _units_assignment
+from ansys.aedt.core.internal.errors import AEDTRuntimeError
 from ansys.aedt.core.modeler.cad.elements_3d import BinaryTreeNode
 from ansys.aedt.core.modeler.cad.elements_3d import HistoryProps
 from ansys.aedt.core.modeler.geometry_operators import GeometryOperators
@@ -46,8 +48,17 @@ class LimitLine(BinaryTreeNode):
         self._app = post._app
         self._oreport_setup = post.oreportsetup
         self.line_name = trace_name
-        self.LINESTYLE = LineStyle()
         self._initialize_tree_node()
+
+    @property
+    def LINESTYLE(self):
+        """Deprecated: Use a plot category from ``ansys.aedt.core.generic.constants.LineSyle`` instead."""
+        warnings.warn(
+            "Usage of LINESTYLE is deprecated. Use ansys.aedt.core.generic.constants.LineStyle instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return LineStyle
 
     @pyaedt_function_handler()
     def _initialize_tree_node(self):
@@ -248,9 +259,6 @@ class Trace(BinaryTreeNode):
         self._oreport_setup = post.oreportsetup
         self.aedt_name = aedt_name
         self._name = trace_name
-        self.LINESTYLE = LineStyle()
-        self.TRACETYPE = TraceType()
-        self.SYMBOLSTYLE = SymbolStyle()
         self._trace_style = None
         self._trace_width = None
         self._trace_color = None
@@ -261,6 +269,36 @@ class Trace(BinaryTreeNode):
         self._show_symbol = False
         self._available_props = []
         self._initialize_tree_node()
+
+    @property
+    def LINESTYLE(self):
+        """Deprecated: Use a plot category from ``ansys.aedt.core.generic.constants.LineSyle`` instead."""
+        warnings.warn(
+            "Usage of LINESTYLE is deprecated. Use ansys.aedt.core.generic.constants.LineStyle instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return LineStyle
+
+    @property
+    def TRACETYPE(self):
+        """Deprecated: Use a plot category from ``ansys.aedt.core.generic.constants.TraceType`` instead."""
+        warnings.warn(
+            "Usage of TRACETYPE is deprecated. Use ansys.aedt.core.generic.constants.TraceType instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return TraceType
+
+    @property
+    def SYMBOLSTYLE(self):
+        """Deprecated: Use a plot category from ``ansys.aedt.core.generic.constants.SymbolStyle`` instead."""
+        warnings.warn(
+            "Usage of SYMBOLSTYLE is deprecated. Use ansys.aedt.core.generic.constants.SymbolStyle instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return SymbolStyle
 
     @pyaedt_function_handler()
     def _initialize_tree_node(self):
@@ -484,7 +522,10 @@ class CommonReport(BinaryTreeNode):
         """
         if self._is_created and (
             self._app.design_type in ["Q3D Extractor", "2D Extractor"]
-            or (self._app.design_type in ["Maxwell 2D", "Maxwell 3D"] and self._app.solution_type == "EddyCurrent")
+            or (
+                self._app.design_type in ["Maxwell 2D", "Maxwell 3D"]
+                and self._app.solution_type in ["EddyCurrent", "AC Magnetic"]
+            )
         ):
             try:
                 if "Parameter" in self.traces[0].properties:
@@ -641,7 +682,7 @@ class CommonReport(BinaryTreeNode):
         except Exception:
             return _traces
         for el in oo_names:
-            if "Families" not in oo.GetChildObject(el).GetPropNames():
+            if {"Families", "Source"}.isdisjoint(set(oo.GetChildObject(el).GetPropNames())):
                 continue
             try:
                 oo1 = oo.GetChildObject(el)
@@ -1256,12 +1297,19 @@ class CommonReport(BinaryTreeNode):
             return
         if self.primary_sweep == "Freq" and domain == "Time":
             self.primary_sweep = "Time"
-            self.variations.pop("Freq", None)
-            self.variations["Time"] = ["All"]
+            if isinstance(self._legacy_props["context"]["variations"], dict):
+                self._legacy_props["context"]["variations"].pop("Freq", None)
+                self._legacy_props["context"]["variations"]["Time"] = ["All"]
+            else:  # pragma: no cover
+                self._legacy_props["context"]["variations"] = {"Time": "All"}
+
         elif self.primary_sweep == "Time" and domain == "Sweep":
             self.primary_sweep = "Freq"
-            self.variations.pop("Time", None)
-            self.variations["Freq"] = ["All"]
+            if isinstance(self._legacy_props["context"]["variations"], dict):
+                self._legacy_props["context"]["variations"].pop("Time", None)
+                self._legacy_props["context"]["variations"]["Freq"] = ["All"]
+            else:  # pragma: no cover
+                self._legacy_props["context"]["variations"] = {"Freq": "All"}
 
     @property
     def use_pulse_in_tdr(self):
@@ -1371,7 +1419,8 @@ class CommonReport(BinaryTreeNode):
             output_dict["context"]["polyline"] = self.polyline
             output_dict["context"]["point_number"] = self.point_number
         elif self._app.design_type in ["Q3D Extractor", "2D Extractor"] or (
-            self._app.design_type in ["Maxwell 2D", "Maxwell 3D"] and self._app.solution_type == "EddyCurrent"
+            self._app.design_type in ["Maxwell 2D", "Maxwell 3D"]
+            and self._app.solution_type in ["EddyCurrent", "AC Magnetic"]
         ):
             output_dict["context"]["matrix"] = self.matrix
         elif self.traces and any(
@@ -2634,6 +2683,67 @@ class CommonReport(BinaryTreeNode):
             self._post.logger.error(msg)
             return False
         self._post.oreportsetup.ApplyReportTemplate(self.plot_name, input_file, property_type)
+        return True
+
+    @pyaedt_function_handler(trace_name="name")
+    def add_trace_characteristics(self, name, arguments=None, solution_range=None):
+        """Add a trace characteristic to the plot.
+
+        Parameters
+        ----------
+        name : str
+            Name of the trace characteristic.
+        arguments : list, optional
+            Arguments if any. The default is ``None``.
+        solution_range : list, optional
+            Output range. The default is ``None``, in which case
+            the full range is used.
+
+        Returns
+        -------
+        bool
+            ``True`` when successful, ``False`` when failed.
+        """
+        if not arguments:
+            arguments = []
+        if not solution_range:
+            solution_range = ["Full"]
+        self._post.oreportsetup.AddTraceCharacteristics(self.plot_name, name, arguments, solution_range)
+        return True
+
+    @pyaedt_function_handler()
+    def export_table_to_file(self, plot_name, output_file, table_type="Marker"):
+        """Export a marker table or a legend (with trace characteristics result) from a report to a file.
+
+        Parameters
+        ----------
+        plot_name : str
+            Plot name.
+        output_file : str
+            Full path of the outputted file.
+            Valid extensions for the output file are: ``.tab``, ``.csv``
+        table_type : str
+            Valid table types are: ``Marker``, ``DeltaMarker``, ``Legend``.
+            Default table_type is ``Marker``.
+
+        Returns
+        -------
+        bool
+            ``True`` when successful, ``False`` when failed.
+
+        References
+        ----------
+        >>> oModule.ExportTableToFile
+        """
+        plot_names = [plot.plot_name for plot in self._post.plots]
+        if plot_name not in plot_names:
+            raise AEDTRuntimeError("Please enter a plot name.")
+        extension = os.path.splitext(output_file)[1]
+        if extension not in [".tab", ".csv"]:
+            raise AEDTRuntimeError("Please enter a valid file extension: ``.tab``, ``.csv``.")
+        if table_type not in ["Marker", "DeltaMarker", "Legend"]:
+            raise AEDTRuntimeError("Please enter a valid file extension: ``Marker``, ``DeltaMarker``, ``Legend``.")
+        self._post.oreportsetup.ExportTableToFile(plot_name, output_file, table_type)
         return True
 
     @staticmethod

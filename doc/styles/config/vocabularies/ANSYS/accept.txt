@@ -8,18 +8,21 @@ airgap
 (?i)Ansys
 API
 autosave
+beamforming
 brd
 busbar
 busbars
 Bz
 CHECKIN
 [Cc]ircuit
+[Cc]loud
 codecov
 (?i)Com
 COM interface
 [Cc]omponents
 Conda
 CPython
+cutout_type
 DesignXploration
 docstring
 [Dd]ocstrings
@@ -29,9 +32,13 @@ EDB
 EDT
 efields
 EMIT
+expansion_factor
+fanout
 FEBI
 FE-BI
 file_path
+fix_disjoints
+FRTM
 getters
 Github
 globals
@@ -65,6 +72,7 @@ padstack
 padstacks
 parametrics
 PDF
+[Pp]ersonal[Ll]ib
 PMs
 [Pp]olyline
 polylines
@@ -93,10 +101,13 @@ Stackup 3D
 stackups
 stripline
 subcircuit
+[Ss]ys[Ll]ib
 [Tt]oolkits
 [Tt]oolkit [Mm]anager
 Twin Builder
 Uncomment
+untrusted
+utils
 vias
 manual_settings
 boolean
@@ -110,3 +121,6 @@ toml
 Parasolid
 i.e.
 solderballs
+pin_mapping
+refdes
+gnd

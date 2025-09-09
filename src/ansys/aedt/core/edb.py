@@ -22,7 +22,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os
 
 from ansys.aedt.core.generic.settings import settings
 
@@ -83,19 +82,19 @@ def Edb(
 
     Add a new variable named "s1" to the ``Edb`` instance.
 
-    >>> app['s1'] = "0.25 mm"
-    >>> app['s1'].tofloat
+    >>> app["s1"] = "0.25 mm"
+    >>> app["s1"].tofloat
     >>> 0.00025
-    >>> app['s1'].tostring
+    >>> app["s1"].tostring
     >>> "0.25mm"
 
     or add a new parameter with description:
 
-    >>> app['s2'] = ["20um", "Spacing between traces"]
-    >>> app['s2'].value
+    >>> app["s2"] = ["20um", "Spacing between traces"]
+    >>> app["s2"].value
     >>> 1.9999999999999998e-05
-    >>> app['s2'].description
-    >>> 'Spacing between traces'
+    >>> app["s2"].description
+    >>> "Spacing between traces"
 
 
     Create an ``Edb`` object and open the specified project.
@@ -108,25 +107,20 @@ def Edb(
     >>> app = Edb("/path/to/file/myfile.gds")
 
     """
-
     # Use EDB legacy (default choice)
-    if bool(os.getenv("PYEDB_USE_DOTNET", "1")):
-        from pyedb.dotnet.edb import Edb as app
+    from pyedb import Edb
 
-        return app(
-            edbpath=edbpath,
-            cellname=cellname,
-            isreadonly=isreadonly,
-            edbversion=edbversion,
-            isaedtowned=isaedtowned,
-            oproject=oproject,
-            student_version=student_version,
-            use_ppe=use_ppe,
-            technology_file=technology_file,
-        )
-    # TODO: Use EDB gRPC
-    else:
-        raise Exception("not implemented yet.")
+    return Edb(
+        edbpath=edbpath,
+        cellname=cellname,
+        isreadonly=isreadonly,
+        edbversion=edbversion,
+        isaedtowned=isaedtowned,
+        oproject=oproject,
+        student_version=student_version,
+        use_ppe=use_ppe,
+        technology_file=technology_file,
+    )
 
 
 def Siwave(

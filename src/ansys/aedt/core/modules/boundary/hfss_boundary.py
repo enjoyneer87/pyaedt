@@ -65,11 +65,14 @@ class FieldSetup(BoundaryCommon, BinaryTreeNode):
         child_object = None
         design_childs = self._app.get_oo_name(self._app.odesign)
 
-        if "Radiation" in design_childs:
-            cc = self._app.get_oo_object(self._app.odesign, "Radiation")
-            cc_names = self._app.get_oo_name(cc)
-            if self._name in cc_names:
-                child_object = cc.GetChildObject(self._name)
+        for category in ["Radiation", "EM Fields"]:
+            if category in design_childs:
+                cc = self._app.get_oo_object(self._app.odesign, category)
+                cc_names = self._app.get_oo_name(cc)
+                if self._name in cc_names:
+                    child_object = cc.GetChildObject(self._name)
+                    break
+
         return child_object
 
     @property
@@ -134,6 +137,8 @@ class FieldSetup(BoundaryCommon, BinaryTreeNode):
             self._app.oradfield.InsertRectangleSetup(self._get_args())
         elif self.type == "NearFieldLine":
             self._app.oradfield.InsertLineSetup(self._get_args())
+        elif self.type == "NearFieldPoints":
+            self._app.oradfield.InsertPointListSetup(self._get_args())
         elif self.type == "AntennaOverlay":
             self._app.oradfield.AddAntennaOverlay(self._get_args())
         elif self.type == "FieldSourceGroup":
@@ -329,7 +334,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def slant_angle(self):
         """Set/Get the Far Field Slant Angle if Polarization is Set to `Slant`."""
-
         if self.props["Polarization"] == "Slant":
             return self.props["SlantAngle"]
         else:
@@ -344,7 +348,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def theta_start(self):
         """Set/Get the Far Field Theta Start Angle if Definition is Set to `Theta-Phi`."""
-
         if "ThetaStart" in self.props:
             return self.props["ThetaStart"]
         else:
@@ -353,7 +356,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def theta_stop(self):
         """Set/Get the Far Field Theta Stop Angle if Definition is Set to `Theta-Phi`."""
-
         if "ThetaStop" in self.props:
             return self.props["ThetaStop"]
         else:
@@ -362,7 +364,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def theta_step(self):
         """Set/Get the Far Field Theta Step Angle if Definition is Set to `Theta-Phi`."""
-
         if "ThetaStep" in self.props:
             return self.props["ThetaStep"]
         else:
@@ -371,7 +372,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def phi_start(self):
         """Set/Get the Far Field Phi Start Angle if Definition is Set to `Theta-Phi`."""
-
         if "PhiStart" in self.props:
             return self.props["PhiStart"]
         else:
@@ -380,7 +380,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def phi_stop(self):
         """Set/Get the Far Field Phi Stop Angle if Definition is Set to `Theta-Phi`."""
-
         if "PhiStop" in self.props:
             return self.props["PhiStop"]
         else:
@@ -389,7 +388,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def phi_step(self):
         """Set/Get the Far Field Phi Step Angle if Definition is Set to `Theta-Phi`."""
-
         if "PhiStep" in self.props:
             return self.props["PhiStep"]
         else:
@@ -398,7 +396,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def azimuth_start(self):
         """Set/Get the Far Field Azimuth Start Angle if Definition is Set to `Az Over El` or `El Over Az`."""
-
         if "AzimuthStart" in self.props:
             return self.props["AzimuthStart"]
         else:
@@ -407,7 +404,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def azimuth_stop(self):
         """Set/Get the Far Field Azimuth Stop Angle if Definition is Set to `Az Over El` or `El Over Az`."""
-
         if "AzimuthStop" in self.props:
             return self.props["AzimuthStop"]
         else:
@@ -416,7 +412,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def azimuth_step(self):
         """Set/Get the Far Field Azimuth Step Angle if Definition is Set to `Az Over El` or `El Over Az`."""
-
         if "AzimuthStep" in self.props:
             return self.props["AzimuthStep"]
         else:
@@ -425,7 +420,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def elevation_start(self):
         """Set/Get the Far Field Elevation Start Angle if Definition is Set to `Az Over El` or `El Over Az`."""
-
         if "ElevationStart" in self.props:
             return self.props["ElevationStart"]
         else:
@@ -434,7 +428,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def elevation_stop(self):
         """Set/Get the Far Field Elevation Stop Angle if Definition is Set to `Az Over El` or `El Over Az`."""
-
         if "ElevationStop" in self.props:
             return self.props["ElevationStop"]
         else:
@@ -443,7 +436,6 @@ class FarFieldSetup(FieldSetup, object):
     @property
     def elevation_step(self):
         """Set/Get the Far Field Elevation Step Angle if Definition is Set to `Az Over El` or `El Over Az`."""
-
         if "ElevationStep" in self.props:
             return self.props["ElevationStep"]
         else:

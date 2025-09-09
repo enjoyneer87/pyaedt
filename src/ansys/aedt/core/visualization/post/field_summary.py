@@ -23,12 +23,11 @@
 # SOFTWARE.
 
 """
-This module contains these classes: `FieldPlot`, `PostProcessor`, and `SolutionData`.
+Defines these classes: `FieldPlot`, `PostProcessor`, and `SolutionData`.
 
 This module provides all functionalities for creating and editing plots in the 3D tools.
 
 """
-
 
 from collections import defaultdict
 import csv
@@ -36,15 +35,14 @@ import os
 import tempfile
 import warnings
 
-from ansys.aedt.core.generic.general_methods import open_file
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 
 try:
     import pandas as pd
 except ImportError:  # pragma: no cover
     warnings.warn(
-        "The Matplotlib module is required to run functionalities of FieldSummary.\n"
-        "Install with \n\npip install matplotlib"
+        "The Pandas module is required to run functionalities of FieldSummary.\nInstall with \n\npip install pandas"
     )
     pd = None
 
@@ -232,7 +230,7 @@ class FieldSummary:
                 df = pd.DataFrame.from_dict(out_dict)
                 for col in ["Min", "Max", "Mean", "Stdev", "Total"]:
                     if col in df.columns:
-                        df[col] = df[col].astype(float)
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
                 return df
         return out_dict
 

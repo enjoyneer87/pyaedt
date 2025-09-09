@@ -21,21 +21,23 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-
+import locale
 import math
-import os
+from pathlib import Path
 import secrets
 import warnings
 
 from ansys.aedt.core.generic.constants import AEDT_UNITS
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import open_file
+from ansys.aedt.core.generic.file_utils import recursive_glob
 from ansys.aedt.core.generic.general_methods import filter_string
-from ansys.aedt.core.generic.general_methods import generate_unique_name
-from ansys.aedt.core.generic.general_methods import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.general_methods import recursive_glob
-from ansys.aedt.core.generic.load_aedt_file import load_keyword_in_aedt_file
-from ansys.aedt.core.generic.numbers import decompose_variable_value
+from ansys.aedt.core.generic.numbers_utils import Quantity
+from ansys.aedt.core.generic.numbers_utils import is_number
+from ansys.aedt.core.internal.load_aedt_file import load_keyword_in_aedt_file
 from ansys.aedt.core.modeler.circuits.object_3d_circuit import CircuitComponent
+from ansys.aedt.core.modeler.circuits.object_3d_circuit import Excitations
 from ansys.aedt.core.modeler.circuits.object_3d_circuit import Wire
 
 
@@ -224,32 +226,33 @@ class CircuitComponents(object):
         """
         xpos = point[0]
         ypos = point[1]
-
-        if isinstance(point[0], (float, int)):
-            xpos = (
-                round(point[0] * AEDT_UNITS["Length"][self.schematic_units] / AEDT_UNITS["Length"]["mil"], -2)
-                * AEDT_UNITS["Length"]["mil"]
-            )
+        if is_number(xpos):
+            xpos = Quantity(xpos, self.schematic_units)
+        elif xpos in self._app.variable_manager.variables:
+            xpos = Quantity(self._app[xpos])
         else:
-            decomposed = decompose_variable_value(point[0])
-            if decomposed[1] != "":
-                xpos = (
-                    round(decomposed[0] * AEDT_UNITS["Length"][decomposed[1]] / AEDT_UNITS["Length"]["mil"], -2)
-                    * AEDT_UNITS["Length"]["mil"]
-                )
-        if isinstance(point[1], (float, int)):
-            ypos = (
-                round(point[1] * AEDT_UNITS["Length"][self.schematic_units] / AEDT_UNITS["Length"]["mil"], -2)
-                * AEDT_UNITS["Length"]["mil"]
-            )
+            try:
+                xpos = Quantity(xpos)
+            except Exception:
+                raise ValueError("Units must be in length units")
+        if is_number(ypos):
+            ypos = Quantity(ypos, self.schematic_units)
+        elif ypos in self._app.variable_manager.variables:
+            ypos = Quantity(self._app[ypos])
         else:
-            decomposed = decompose_variable_value(point[1])
-            if decomposed[1] != "":
-                ypos = (
-                    round(decomposed[0] * AEDT_UNITS["Length"][decomposed[1]] / AEDT_UNITS["Length"]["mil"], -2)
-                    * AEDT_UNITS["Length"]["mil"]
-                )
-        return xpos, ypos
+            try:
+                ypos = Quantity(ypos)
+            except Exception:
+                raise ValueError("Units must be in length units")
+        if xpos.unit_system != "Length" or ypos.unit_system != "Length":
+            raise ValueError("Units must be in length units")
+        xpos = xpos.to("mil")
+        ypos = ypos.to("mil")
+        xpos.value = round(xpos.value, -2)
+        ypos.value = round(ypos.value, -2)
+        xpos = xpos.to("meter")
+        ypos = ypos.to("meter")
+        return xpos.value, ypos.value
 
     @pyaedt_function_handler()
     def _convert_point_to_units(self, point):
@@ -258,6 +261,7 @@ class CircuitComponents(object):
 
     @pyaedt_function_handler()
     def _get_location(self, location=None):
+        locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
         if not location:
             xpos = self.current_position[0]
             ypos = self.current_position[1]
@@ -344,26 +348,25 @@ class CircuitComponents(object):
         if location is None:
             location = []
 
-        if name in self._app.excitations:
+        if name in self._app.excitation_names:
             self.logger.warning("Port name already assigned.")
             return False
 
         xpos, ypos = self._get_location(location)
-        id = self.create_unique_id()
-        arg1 = ["NAME:IPortProps", "Name:=", name, "Id:=", id]
-        arg2 = ["NAME:Attributes", "Page:=", 1, "X:=", xpos, "Y:=", ypos, "Angle:=", angle, "Flip:=", False]
-        id = self.oeditor.CreateIPort(arg1, arg2)
 
-        id = int(id.split(";")[1])
-        self.add_id_to_component(id)
-        # return id, self.components[id].composed_name
-        for el in self.components:
-            if ("IPort@" + name + ";" + str(id)) in self.components[el].composed_name:
-                return self._app.excitation_objects[name]
-        return False
+        arg1 = ["NAME:IPortProps", "Name:=", name]
+        arg2 = ["NAME:Attributes", "Page:=", 1, "X:=", xpos, "Y:=", ypos, "Angle:=", angle, "Flip:=", False]
+        comp_name = self.oeditor.CreateIPort(arg1, arg2)
+
+        id = int(comp_name.split(";")[-1])
+        self.add_id_to_component(id, comp_name)
+
+        self._app._internal_excitations[name] = self.components[id]
+
+        return self._app.design_excitations[name]
 
     @pyaedt_function_handler()
-    def create_page_port(self, name, location=None, angle=0):
+    def create_page_port(self, name, location=None, angle=0, label_position="Auto"):
         """Create a page port.
 
         Parameters
@@ -373,8 +376,11 @@ class CircuitComponents(object):
         location : list, optional
             Position on the X and Y axis.
             If not provided the default is ``None``, in which case an empty list is set.
-        angle : optional
+        angle : int, optional
             Angle rotation in degrees. The default is ``0``.
+        label_position : str, optional
+            Label position. The default is ``"auto"``.
+            Options are ''"Center"``, ``"Left"``, ``"Right"``, ``"Top"``, ``"Bottom"``.
 
         Returns
         -------
@@ -388,14 +394,52 @@ class CircuitComponents(object):
         location = [] if location is None else location
         xpos, ypos = self._get_location(location)
 
-        id = self.create_unique_id()
-        id = self.oeditor.CreatePagePort(
-            ["NAME:PagePortProps", "Name:=", name, "Id:=", id],
-            ["NAME:Attributes", "Page:=", 1, "X:=", xpos, "Y:=", ypos, "Angle:=", angle, "Flip:=", False],
+        # id = self.create_unique_id()
+        comp_name = self.oeditor.CreatePagePort(
+            ["NAME:PagePortProps", "Name:=", name],
+            [
+                "NAME:Attributes",
+                "Page:=",
+                1,
+                "X:=",
+                xpos,
+                "Y:=",
+                ypos,
+                "Angle:=",
+                angle * math.pi / 180,
+                "Flip:=",
+                False,
+            ],
         )
-        id = int(id.split(";")[1])
+
+        id = int(comp_name.split(";")[-1])
         # self.refresh_all_ids()
-        self.add_id_to_component(id)
+        self.add_id_to_component(id, comp_name)
+        if label_position == "Auto":
+            if angle == 270:
+                new_loc = "Top"
+            elif angle == 180:
+                new_loc = "Right"
+            elif angle == 90:
+                new_loc = "Bottom"
+            else:
+                new_loc = "Left"
+            self.oeditor.ChangeProperty(
+                [
+                    "NAME:AllTabs",
+                    [
+                        "NAME:PropDisplayPropTab",
+                        [
+                            "NAME:PropServers",
+                            self.components[id].composed_name,
+                        ],
+                        [
+                            "NAME:ChangedProps",
+                            ["NAME:PortName", "Format:=", "Value", "Location:=", "Center", "NewLocation:=", new_loc],
+                        ],
+                    ],
+                ]
+            )
         return self.components[id]
 
     @pyaedt_function_handler()
@@ -424,14 +468,14 @@ class CircuitComponents(object):
             location = []
 
         xpos, ypos = self._get_location(location)
-        id = self.create_unique_id()
+        # id = self.create_unique_id()
         angle = math.pi * angle / 180
         name = self.oeditor.CreateGround(
-            ["NAME:GroundProps", "Id:=", id],
+            ["NAME:GroundProps"],
             ["NAME:Attributes", "Page:=", page, "X:=", xpos, "Y:=", ypos, "Angle:=", angle, "Flip:=", False],
         )
-        id = int(name.split(";")[1])
-        self.add_id_to_component(id)
+        id = int(name.split(";")[-1])
+        self.add_id_to_component(id, name)
         # return id, self.components[id].composed_name
         for el in self.components:
             if name in self.components[el].composed_name:
@@ -443,7 +487,7 @@ class CircuitComponents(object):
 
         Parameters
         ----------
-        input_file : str
+        input_file : str or :class:`pathlib.Path`
             Full path to the Touchstone file.
         model_name : str, optional
             Name of the model. The default is ``None``.
@@ -461,44 +505,13 @@ class CircuitComponents(object):
         >>> oModelManager.Add
         >>> oComponentManager.Add
         """
-
-        def _parse_ports_name(file, num_terminal):
-            """Parse and interpret the option line in the touchstone file.
-
-            Parameters
-            ----------
-            file : str
-                Path of the Touchstone file.
-            num_terminal : int
-                Number of terminals.
-
-            Returns
-            -------
-            List of str
-                Names of the ports in the touchstone file.
-
-            """
-            portnames = []
-            line = file.readline()
-            while not line.startswith("! Port") and not line.startswith("! NPort") and line.find("S11") == -1:
-                line = file.readline()
-            if line.startswith("! Port"):
-                while line.startswith("! Port"):
-                    portnames.append(line.split(" = ")[1].strip())
-                    line = file.readline()
-            else:  # pragma: no cover
-                portnames = ["Port" + str(n) for n in range(1, num_terminal + 1)]
-            return portnames
-
         if not model_name:
-            model_name = os.path.splitext(os.path.basename(input_file))[0]
+            model_name = Path(Path(input_file).name).stem
             if "." in model_name:
                 model_name = model_name.replace(".", "_")
         if model_name in list(self.omodel_manager.GetNames()):
             model_name = generate_unique_name(model_name, n=2)
-        num_terminal = int(os.path.splitext(input_file)[1].lower().strip(".sp"))
-        # with open_file(touchstone_full_path, "r") as f:
-        # port_names = _parse_ports_name(f, num_terminal)
+        num_terminal = int(Path(input_file).suffix.lower().strip(".sp"))
 
         port_names = []
         with open_file(input_file, "r") as f:
@@ -512,11 +525,11 @@ class CircuitComponents(object):
         image_subcircuit_path = ""
         bmp_file_name = ""
         if show_bitmap:
-            image_subcircuit_path = os.path.join(self._app.desktop_install_dir, "syslib", "Bitmaps", "nport.bmp")
-            bmp_file_name = os.path.basename(image_subcircuit_path)
+            image_subcircuit_path = Path(self._app.desktop_install_dir) / "syslib" / "Bitmaps" / "nport.bmp"
+            bmp_file_name = Path(image_subcircuit_path).name
 
         if not port_names:
-            port_names = ["Port" + str(i + 1) for i in range(num_terminal)]
+            port_names = [str(i + 1) for i in range(num_terminal)]
         arg = [
             "NAME:" + model_name,
             "Name:=",
@@ -532,13 +545,13 @@ class CircuitComponents(object):
             "Description:=",
             "",
             "ImageFile:=",
-            image_subcircuit_path,
+            str(image_subcircuit_path),
             "SymbolPinConfiguration:=",
             0,
             ["NAME:PortInfoBlk"],
             ["NAME:PortOrderBlk"],
             "filename:=",
-            input_file,
+            str(input_file),
             "numberofports:=",
             num_terminal,
             "sssfilename:=",
@@ -647,7 +660,7 @@ class CircuitComponents(object):
                 "InfoHelpFile:=",
                 "",
                 "IconFile:=",
-                bmp_file_name,
+                str(bmp_file_name),
                 "Library:=",
                 "",
                 "OriginalLocation:=",
@@ -720,6 +733,245 @@ class CircuitComponents(object):
         self.ocomponent_manager.Add(arg)
         return model_name
 
+    @pyaedt_function_handler(touchstone_full_path="input_file")
+    def create_model_from_nexxim_state_space(self, input_file, num_terminal, model_name=None, port_names=None):
+        """Create a model from a Touchstone file.
+
+        Parameters
+        ----------
+        input_file : str
+            Full path to the Touchstone file.
+        num_terminal : int
+            Number of terminals in the .sss file.
+        model_name : str, optional
+            Name of the model. The default is ``None``.
+        show_bitmap : bool, optional
+            Show bitmap image of schematic component.
+            The default value is ``True``.
+        port_names : list, optional
+            List of port names. The default is ``None``.
+
+        Returns
+        -------
+        str
+            Model name when successfully created. ``False`` if something went wrong.
+
+        References
+        ----------
+        >>> oModelManager.Add
+        >>> oComponentManager.Add
+        """
+        if not model_name:
+            model_name = Path(Path(input_file).name).stem
+            if "." in model_name:
+                model_name = model_name.replace(".", "_")
+        if model_name in list(self.omodel_manager.GetNames()):
+            model_name = generate_unique_name(model_name, n=2)
+        if not port_names:
+            port_names = [str(i + 1) for i in range(num_terminal)]
+        arg = [
+            "NAME:" + model_name,
+            "Name:=",
+            model_name,
+            "ModTime:=",
+            0,
+            "Library:=",
+            "",
+            "LibLocation:=",
+            "Project",
+            "ModelType:=",
+            "nport_sss",
+            "Description:=",
+            "",
+            "ImageFile:=",
+            "",
+            "SymbolPinConfiguration:=",
+            0,
+            ["NAME:PortInfoBlk"],
+            ["NAME:PortOrderBlk"],
+            "filename:=",
+            "",
+            "numberofports:=",
+            num_terminal,
+            "sssfilename:=",
+            input_file,
+            "sssmodel:=",
+            True,
+            "PortNames:=",
+            port_names,
+            "domain:=",
+            "frequency",
+            "datamode:=",
+            "Link",
+            "devicename:=",
+            "",
+            "SolutionName:=",
+            "",
+            "displayformat:=",
+            "MagnitudePhase",
+            "datatype:=",
+            "SMatrix",
+            [
+                "NAME:DesignerCustomization",
+                "DCOption:=",
+                0,
+                "InterpOption:=",
+                0,
+                "ExtrapOption:=",
+                1,
+                "Convolution:=",
+                0,
+                "Passivity:=",
+                0,
+                "Reciprocal:=",
+                False,
+                "ModelOption:=",
+                "",
+                "DataType:=",
+                1,
+            ],
+            [
+                "NAME:NexximCustomization",
+                "DCOption:=",
+                3,
+                "InterpOption:=",
+                1,
+                "ExtrapOption:=",
+                3,
+                "Convolution:=",
+                0,
+                "Passivity:=",
+                0,
+                "Reciprocal:=",
+                False,
+                "ModelOption:=",
+                "",
+                "DataType:=",
+                2,
+            ],
+            [
+                "NAME:HSpiceCustomization",
+                "DCOption:=",
+                1,
+                "InterpOption:=",
+                2,
+                "ExtrapOption:=",
+                3,
+                "Convolution:=",
+                0,
+                "Passivity:=",
+                0,
+                "Reciprocal:=",
+                False,
+                "ModelOption:=",
+                "",
+                "DataType:=",
+                3,
+            ],
+            "NoiseModelOption:=",
+            "External",
+        ]
+        self.omodel_manager.Add(arg)
+        arg = [
+            "NAME:" + model_name,
+            "Info:=",
+            [
+                "Type:=",
+                10,
+                "NumTerminals:=",
+                num_terminal,
+                "DataSource:=",
+                "",
+                "ModifiedOn:=",
+                1618569625,
+                "Manufacturer:=",
+                "",
+                "Symbol:=",
+                "",
+                "ModelNames:=",
+                "",
+                "Footprint:=",
+                "",
+                "Description:=",
+                "",
+                "InfoTopic:=",
+                "",
+                "InfoHelpFile:=",
+                "",
+                "IconFile:=",
+                "",
+                "Library:=",
+                "",
+                "OriginalLocation:=",
+                "Project",
+                "IEEE:=",
+                "",
+                "Author:=",
+                "",
+                "OriginalAuthor:=",
+                "",
+                "CreationDate:=",
+                1618569625,
+                "ExampleFile:=",
+                "",
+                "HiddenComponent:=",
+                0,
+                "CircuitEnv:=",
+                0,
+                "GroupID:=",
+                0,
+            ],
+            "CircuitEnv:=",
+            0,
+            "Refbase:=",
+            "S",
+            "NumParts:=",
+            1,
+            "ModSinceLib:=",
+            False,
+        ]
+        for i in range(num_terminal):
+            arg.append("Terminal:=")
+            arg.append([port_names[i], port_names[i], "A", False, i, 1, "", "Electrical", "0"])
+        arg.append("CompExtID:=")
+        arg.append(5)
+        arg.append(
+            [
+                "NAME:Parameters",
+                "MenuProp:=",
+                ["CoSimulator", "SD", "", "Default", 0],
+                "ButtonProp:=",
+                ["CosimDefinition", "SD", "", "Edit", "Edit", 40501, "ButtonPropClientData:=", []],
+            ]
+        )
+        arg.append(
+            [
+                "NAME:CosimDefinitions",
+                [
+                    "NAME:CosimDefinition",
+                    "CosimulatorType:=",
+                    110,
+                    "CosimDefName:=",
+                    "Default",
+                    "IsDefinition:=",
+                    True,
+                    "Connect:=",
+                    True,
+                    "ModelDefinitionName:=",
+                    model_name,
+                    "ShowRefPin2:=",
+                    2,
+                    "LenPropName:=",
+                    "",
+                ],
+                "DefaultCosim:=",
+                "Default",
+            ]
+        )
+
+        self.ocomponent_manager.Add(arg)
+        return model_name
+
     @pyaedt_function_handler()
     def create_touchstone_component(
         self,
@@ -756,24 +1008,79 @@ class CircuitComponents(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Circuit
+        >>> from pathlib import Path
         >>> cir = Circuit()
         >>> comps = cir.modeler.components
-        >>> s_parameter_path = os.path.join("your_path", "s_param_file_name.s4p")
+        >>> s_parameter_path = Path("your_path") / "s_param_file_name.s4p"
         >>> circuit_comp = comps.create_touchstone_component(s_parameter_path, location=[0.0, 0.0], show_bitmap=False)
         """
+        if not Path(model_name):
+            raise FileNotFoundError("File not found.")
+        model_name = self.create_model_from_touchstone(str(model_name), show_bitmap=show_bitmap)
         if location is None:
             location = []
         xpos, ypos = self._get_location(location)
-        id = self.create_unique_id()
-        if os.path.exists(model_name):
-            model_name = self.create_model_from_touchstone(model_name, show_bitmap=show_bitmap)
-        arg1 = ["NAME:ComponentProps", "Name:=", model_name, "Id:=", str(id)]
+        # id = self.create_unique_id()
+        if Path(model_name).exists():
+            model_name = self.create_model_from_touchstone(str(model_name), show_bitmap=show_bitmap)
+        arg1 = ["NAME:ComponentProps", "Name:=", model_name]
         arg2 = ["NAME:Attributes", "Page:=", 1, "X:=", xpos, "Y:=", ypos, "Angle:=", angle, "Flip:=", False]
-        id = self.oeditor.CreateComponent(arg1, arg2)
-        id = int(id.split(";")[1])
-        self.add_id_to_component(id)
+        comp_name = self.oeditor.CreateComponent(arg1, arg2)
+        id = int(comp_name.split(";")[-1])
+        self.add_id_to_component(id, comp_name)
+        return self.components[id]
+
+    @pyaedt_function_handler()
+    def create_nexxim_state_space_component(
+        self,
+        model_name,
+        num_terminal,
+        location=None,
+        angle=0,
+        port_names=None,
+    ):
+        """Create a component from a Touchstone model.
+
+        Parameters
+        ----------
+                model_name : str, Path
+                    Name of the Touchstone model or full path to touchstone file.
+                    If full touchstone is provided then, new model will be created.
+                num_terminal : int
+                    Number of terminals in the .sss file.
+                location : list of float, optional
+                    Position on the X  and Y axis.
+                angle : float, optional
+                    Angle rotation in degrees. The default is ``0``.
+                port_names : list, optional
+                    Name of ports.
+        .
+
+        Returns
+        -------
+                :class:`ansys.aedt.core.modeler.circuits.object_3d_circuit.CircuitComponent`
+                    Circuit Component Object.
+
+        References
+        ----------
+                >>> oModelManager.Add
+                >>> oComponentManager.Add
+                >>> oEditor.CreateComponent
+
+        """
+        if not Path(model_name):
+            raise FileNotFoundError("File not found.")
+        model_name = self.create_model_from_nexxim_state_space(str(model_name), num_terminal, port_names=port_names)
+        if location is None:
+            location = []
+        xpos, ypos = self._get_location(location)
+        # id = self.create_unique_id()
+        arg1 = ["NAME:ComponentProps", "Name:=", str(model_name)]
+        arg2 = ["NAME:Attributes", "Page:=", 1, "X:=", xpos, "Y:=", ypos, "Angle:=", angle, "Flip:=", False]
+        comp_name = self.oeditor.CreateComponent(arg1, arg2)
+        id = int(comp_name.split(";")[-1])
+        self.add_id_to_component(id, comp_name)
         return self.components[id]
 
     @pyaedt_function_handler(inst_name="name")
@@ -822,26 +1129,25 @@ class CircuitComponents(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import TwinBuilder
         >>> aedtapp = TwinBuilder()
-        >>> cmp = aedtapp.modeler.schematic.create_component(component_library="",component_name="ExcitationComponent")
-        >>> cmp.set_property("ShowPin",True)
+        >>> cmp = aedtapp.modeler.schematic.create_component(component_library="", component_name="ExcitationComponent")
+        >>> cmp.set_property("ShowPin", True)
         >>> aedtapp.release_desktop(True, True)
         """
-        id = self.create_unique_id()
+        # id = self.create_unique_id()
         if component_library:
             inst_name = self.design_libray + "\\" + component_library + ":" + component_name
         else:
             inst_name = component_name
-        arg1 = ["NAME:ComponentProps", "Name:=", inst_name, "Id:=", str(id)]
+        arg1 = ["NAME:ComponentProps", "Name:=", inst_name]
         xpos, ypos = self._get_location(location)
         angle = math.pi * angle / 180
         arg2 = ["NAME:Attributes", "Page:=", page, "X:=", xpos, "Y:=", ypos, "Angle:=", angle, "Flip:=", False]
-        id = self.oeditor.CreateComponent(arg1, arg2)
-        id = int(id.split(";")[1])
+        comp_name = self.oeditor.CreateComponent(arg1, arg2)
+        id = int(comp_name.split(";")[-1])
         # self.refresh_all_ids()
-        self.add_id_to_component(id)
+        self.add_id_to_component(id, comp_name)
         if name:
             self.components[id].set_property("InstanceName", name)
         if use_instance_id_netlist:
@@ -1065,26 +1371,37 @@ class CircuitComponents(object):
             if not self.get_obj_id(el):
                 name = el.split(";")
                 if len(name) > 1:
-                    o = CircuitComponent(self, tabname=self.tab_name)
-                    o.name = name[0]
+                    if name[0].startswith("IPort"):
+                        port_name = name[0].replace("IPort@", "")
+                        o = Excitations(self, name=port_name)
+                        o.is_port = True
+                    else:
+                        o = CircuitComponent(self, tabname=self.tab_name)
+                        o.name = name[0]
+
                     if len(name) == 2:
-                        o.schematic_id = name[1]
+                        o.schematic_id = int(name[1].split(":")[0])
                         objID = int(o.schematic_id)
                     else:
                         o.id = int(name[1])
                         o.schematic_id = name[2]
-                        objID = o.id
+                        objID = int(o.schematic_id)
+
+                    if o.is_port:
+                        o._props = o._excitation_props()
                     self.components[objID] = o
         return len(self.components)
 
-    @pyaedt_function_handler()
-    def add_id_to_component(self, id):
+    @pyaedt_function_handler(id="component_id")
+    def add_id_to_component(self, component_id, name=None):
         """Add an ID to a component.
 
         Parameters
         ----------
-        id : int
+        component_id : int
             ID to assign to the component.
+        name : str, optional
+            Component name. The default is ``None``.
 
         Returns
         -------
@@ -1092,19 +1409,51 @@ class CircuitComponents(object):
             Number of components.
 
         """
-        obj = self.oeditor.GetAllElements()
-        for el in obj:
-            name = el.split(";")
-            if len(name) > 1 and str(id) == name[1]:
-                o = CircuitComponent(self, tabname=self.tab_name)
-                o.name = name[0]
+        if name:
+            name = name.split(";")
+            if len(name) > 1 and str(component_id) == name[-1]:
+                if name[0].startswith("IPort"):
+                    port_name = name[0].replace("IPort@", "")
+                    o = Excitations(self, name=port_name)
+                    o.is_port = True
+                else:
+                    o = CircuitComponent(self, tabname=self.tab_name)
+                    o.name = name[0]
                 if len(name) > 2:
                     o.id = int(name[1])
                     o.schematic_id = int(name[2])
-                    objID = o.id
-                else:
-                    o.schematic_id = int(name[1])
                     objID = o.schematic_id
+                else:
+                    o.schematic_id = int(name[1].split(":")[0])
+                    objID = o.schematic_id
+
+                if o.is_port:
+                    o._props = o._excitation_props()
+
+                self.components[objID] = o
+            return len(self.components)
+        obj = self.oeditor.GetAllElements()
+        for el in obj:
+            name = el.split(";")
+            if len(name) > 1 and str(component_id) == name[-1]:
+                if name[0].startswith("IPort"):
+                    port_name = name[0].replace("IPort@", "")
+                    o = Excitations(self, name=port_name)
+                    o.is_port = True
+                else:
+                    o = CircuitComponent(self, tabname=self.tab_name)
+                    o.name = name[0]
+                if len(name) > 2:
+                    o.id = int(name[1])
+                    o.schematic_id = int(name[2])
+                    objID = o.schematic_id
+                else:
+                    o.schematic_id = int(name[1].split(":")[0])
+                    objID = o.schematic_id
+
+                if o.is_port:
+                    o._props = o._excitation_props()
+
                 self.components[objID] = o
 
         return len(self.components)
@@ -1230,9 +1579,9 @@ class CircuitComponents(object):
         >>> oEditor.CreateLine
         """
         points = [str(tuple(self._convert_point_to_meter(i))) for i in points]
-        id = self.create_unique_id()
+        # id = self.create_unique_id()
         return self.oeditor.CreateLine(
-            ["NAME:LineData", "Points:=", points, "LineWidth:=", width, "Color:=", color, "Id:=", id],
+            ["NAME:LineData", "Points:=", points, "LineWidth:=", width, "Color:=", color],
             ["NAME:Attributes", "Page:=", 1],
         )
 
@@ -1260,8 +1609,8 @@ class CircuitComponents(object):
         >>> oEditor.CreateWire
         """
         points = [str(tuple(self._convert_point_to_meter(i))) for i in points]
-        wire_id = self.create_unique_id()
-        arg1 = ["NAME:WireData", "Name:=", name, "Id:=", wire_id, "Points:=", points]
+        # wire_id = self.create_unique_id()
+        arg1 = ["NAME:WireData", "Name:=", name, "Points:=", points]
         arg2 = ["NAME:Attributes", "Page:=", page]
         try:
             wire_id = self.oeditor.CreateWire(arg1, arg2)
@@ -1351,15 +1700,21 @@ class ComponentCatalog(object):
             Circuit Component Info.
 
         """
-        items = self.find_components("*" + compname)
-        if items and len(items) == 1:
-            return self.components[items[0]]
-        elif len(items) > 1:
-            self._component_manager._logger.warning("Multiple components found.")
-            return None
+        if self._component_manager.design_type == "EMIT":
+            items = self.find_components("*" + compname + "*")
+            # Return a list of components
+            return [self.components[item] for item in items] if items else []
         else:
-            self._component_manager._logger.warning("Component not found.")
-            return None
+            items = self.find_components("*" + compname)
+            # Return a single component or None
+            if items and len(items) == 1:
+                return self.components[items[0]]
+            elif len(items) > 1:
+                self._component_manager._logger.warning("Multiple components found.")
+                return None
+            else:
+                self._component_manager._logger.warning("Component not found.")
+                return None
 
     def __init__(self, component_manager):
         self._component_manager = component_manager
@@ -1371,18 +1726,18 @@ class ComponentCatalog(object):
     def _index_components(self, library_path=None):
         if library_path:
             sys_files = recursive_glob(library_path, "*.aclb")
-            root = os.path.normpath(library_path).split(os.path.sep)[-1]
+            root = Path(library_path).name
         else:
-            sys_files = recursive_glob(os.path.join(self._app.syslib, self._component_manager.design_libray), "*.aclb")
-            root = os.path.normpath(self._app.syslib).split(os.path.sep)[-1]
+            sys_files = recursive_glob(Path(self._app.syslib) / self._component_manager.design_libray, "*.aclb")
+            root = Path(self._app.syslib).name
         for file in sys_files:
             comps1 = load_keyword_in_aedt_file(file, "DefInfo")
             comps2 = load_keyword_in_aedt_file(file, "CompInfo")
             comps = comps1.get("DefInfo", {})
             comps.update(comps2.get("CompInfo", {}))
             for compname, comp_value in comps.items():
-                root_name, ext = os.path.splitext(os.path.normpath(file))
-                full_path = root_name.split(os.path.sep)
+                root_name = str(Path(file).with_suffix(""))
+                full_path = list(Path(root_name).parts)
                 id = full_path.index(root) + 1
                 if self._component_manager.design_libray in full_path[id:]:
                     id += 1

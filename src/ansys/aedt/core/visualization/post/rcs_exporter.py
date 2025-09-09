@@ -28,10 +28,10 @@ from pathlib import Path
 import shutil
 
 from ansys.aedt.core.generic.constants import unit_converter
-from ansys.aedt.core.generic.errors import AEDTRuntimeError
-from ansys.aedt.core.generic.general_methods import check_and_download_folder
+from ansys.aedt.core.generic.file_utils import check_and_download_folder
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.generic.settings import settings
+from ansys.aedt.core.internal.errors import AEDTRuntimeError
 from ansys.aedt.core.visualization.advanced.rcs_visualization import MonostaticRCSData
 
 DEFAULT_EXPRESSION = "ComplexMonostaticRCSTheta"
@@ -68,11 +68,11 @@ class MonostaticRCSExporter:
     Examples
     --------
     >>> import ansys.aedt.core
-    >>> app = ansys.aedt.core.Hfss(version="2025.1", design="Antenna")
+    >>> app = ansys.aedt.core.Hfss(version="2025.2", design="Antenna")
     >>> setup_name = "Setup1 : LastAdaptive"
     >>> frequencies = [77e9]
     >>> sphere = "3D"
-    >>> data = app.get_monostatic_rcs(frequencies,setup_name,sphere)
+    >>> data = app.get_monostatic_rcs(frequencies, setup_name, sphere)
     >>> data.plot_3d(quantity_format="dB10")
     """
 
@@ -97,12 +97,13 @@ class MonostaticRCSExporter:
         else:
             # Set variation to Nominal
             for var_name, var_value in variations.items():
-                app[var_name] = var_value
+                if var_name in app.variable_manager.independent_variable_names:
+                    app[var_name] = var_value
 
         self.variations = variations
         self.overwrite = overwrite
 
-        if frequencies and not isinstance(frequencies, list):
+        if frequencies is not None and isinstance(frequencies, (float, int, str)):
             self.frequencies = [frequencies]
         else:
             self.frequencies = frequencies
@@ -151,10 +152,13 @@ class MonostaticRCSExporter:
         :class:`ansys.aedt.core.modules.solutions.SolutionData`
             Solution Data object.
         """
-        variations = self.variations
+        variations = {i: k for i, k in self.variations.items()}
         variations["IWaveTheta"] = ["All"]
         variations["IWavePhi"] = ["All"]
-        variations["Freq"] = self.frequencies
+        frequencies = self.frequencies[::]
+        if frequencies is not None:
+            frequencies = [str(freq) for freq in frequencies]
+        variations["Freq"] = frequencies
 
         solution_data = self.__app.post.get_solution_data(
             expressions=self.expression,
@@ -233,8 +237,11 @@ class MonostaticRCSExporter:
                 if not data or data.number_of_variations != 1:  # pragma: no cover
                     raise AEDTRuntimeError("Data can not be obtained.")
 
-                df = data.full_matrix_real_imag[0] + complex(0, 1) * data.full_matrix_real_imag[1]
+                df = data.full_matrix_real_imag[0].astype("float64") + complex(0, 1) * data.full_matrix_real_imag[
+                    1
+                ].astype("float64")
                 df.index.names = [*data.variations[0].keys(), *data.intrinsics.keys()]
+
                 df = df.reset_index(level=[*data.variations[0].keys()], drop=True)
                 df = unit_converter(
                     df, unit_system="Length", input_units=data.units_data[self.expression], output_units="meter"
@@ -271,7 +278,7 @@ class MonostaticRCSExporter:
             with pyaedt_metadata_file.open("w") as f:
                 json.dump(items, f, indent=2)
         except Exception as e:
-            raise AEDTRuntimeError(f"An error occurred when writing metadata") from e
+            raise AEDTRuntimeError("An error occurred when writing metadata") from e
 
         self.__metadata_file = pyaedt_metadata_file
         if not only_geometry:

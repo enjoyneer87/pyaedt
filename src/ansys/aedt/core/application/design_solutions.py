@@ -62,6 +62,14 @@ solutions_types = {
             "default_adaptive": "LastAdaptive",
             "intrinsics": ["Freq", "Phase"],
         },
+        "AC Magnetic": {
+            "name": "EddyCurrent",
+            "options": "XY",
+            "report_type": "EddyCurrent",
+            "default_setup": 7,
+            "default_adaptive": "LastAdaptive",
+            "intrinsics": ["Freq", "Phase"],
+        },
         "Transient": {
             "name": "Transient",
             "options": "XY",
@@ -84,7 +92,22 @@ solutions_types = {
             "default_setup": 58,
             "default_adaptive": "LastAdaptive",
         },
+        "DC Conduction": {
+            "name": "DCConduction",
+            "options": "XY",
+            "report_type": None,
+            "default_setup": 58,
+            "default_adaptive": "LastAdaptive",
+        },
         "ACConduction": {
+            "name": "ACConduction",
+            "options": "XY",
+            "report_type": None,
+            "default_setup": 59,
+            "default_adaptive": "LastAdaptive",
+            "intrinsics": ["Freq", "Phase"],
+        },
+        "AC Conduction": {
             "name": "ACConduction",
             "options": "XY",
             "report_type": None,
@@ -109,7 +132,23 @@ solutions_types = {
             "default_adaptive": "LastAdaptive",
             "intrinsics": ["Freq", "Phase"],
         },
+        "AC Magnetic": {
+            "name": "AC Magnetic",
+            "options": None,
+            "report_type": "AC Magnetic",
+            "default_setup": 7,
+            "default_adaptive": "LastAdaptive",
+            "intrinsics": ["Freq", "Phase"],
+        },
         "DCBiasedEddyCurrent": {
+            "name": "DCBiasedEddyCurrent",
+            "options": None,
+            "report_type": "EddyCurrent",
+            "default_setup": 60,
+            "default_adaptive": "LastAdaptive",
+            "intrinsics": ["Freq", "Phase"],
+        },
+        "AC Magnetic with DC": {
             "name": "DCBiasedEddyCurrent",
             "options": None,
             "report_type": "EddyCurrent",
@@ -133,6 +172,14 @@ solutions_types = {
             "default_adaptive": "Transient",
             "intrinsics": ["Time"],
         },
+        "Transient APhi": {
+            "name": "Transient APhi",
+            "options": None,
+            "report_type": "Transient",
+            "default_setup": 56,
+            "default_adaptive": "Transient",
+            "intrinsics": ["Time"],
+        },
         "Electrostatic": {
             "name": "Electrostatic",
             "options": None,
@@ -148,7 +195,22 @@ solutions_types = {
             "default_adaptive": "LastAdaptive",
             "intrinsics": ["Freq", "Phase"],
         },
+        "AC Conduction": {
+            "name": "ACConduction",
+            "options": None,
+            "report_type": None,
+            "default_setup": 59,
+            "default_adaptive": "LastAdaptive",
+            "intrinsics": ["Freq", "Phase"],
+        },
         "DCConduction": {
+            "name": "DCConduction",
+            "options": None,
+            "report_type": None,
+            "default_setup": 58,
+            "default_adaptive": "LastAdaptive",
+        },
+        "DC Conduction": {
             "name": "DCConduction",
             "options": None,
             "report_type": None,
@@ -162,7 +224,22 @@ solutions_types = {
             "default_setup": 9,
             "default_adaptive": "LastAdaptive",
         },
+        "Electric DC Conduction": {
+            "name": "Electric DC Conduction",
+            "options": None,
+            "report_type": None,
+            "default_setup": 9,
+            "default_adaptive": "LastAdaptive",
+        },
         "ElectricTransient": {
+            "name": "ElectricTransient",
+            "options": None,
+            "report_type": None,
+            "default_setup": 10,
+            "default_adaptive": "Transient",
+            "intrinsics": ["Time"],
+        },
+        "Electric Transient": {
             "name": "ElectricTransient",
             "options": None,
             "report_type": None,
@@ -417,6 +494,13 @@ solutions_types = {
             "default_setup": None,
             "default_adaptive": None,
         },
+        "Characteristic Mode": {
+            "name": "Characteristic Mode",
+            "options": None,
+            "report_type": None,
+            "default_setup": None,
+            "default_adaptive": None,
+        },
         "SBR+": {
             "name": "SBR+",
             "options": None,
@@ -585,7 +669,7 @@ class DesignSolution(object):
         self._odesign = odesign
         self._aedt_version = aedt_version
         self.model_name = model_names[design_type]
-        if not design_type in solutions_types:
+        if design_type not in solutions_types:
             raise ValueError("Design type is not valid.")
         # deepcopy doesn't work on remote
         self._solution_options = copy.deepcopy(solutions_types[design_type])

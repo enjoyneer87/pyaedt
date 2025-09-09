@@ -32,9 +32,9 @@ import warnings
 from ansys.aedt.core.generic.constants import unit_converter
 from ansys.aedt.core.generic.data_handlers import _dict2arg
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.load_aedt_file import load_entire_aedt_file
-from ansys.aedt.core.generic.numbers import _units_assignment
+from ansys.aedt.core.generic.numbers_utils import _units_assignment
 from ansys.aedt.core.generic.settings import settings
+from ansys.aedt.core.internal.load_aedt_file import load_entire_aedt_file
 from ansys.aedt.core.modules.setup_templates import Sweep3DLayout
 from ansys.aedt.core.modules.setup_templates import SweepEddyCurrent
 from ansys.aedt.core.modules.setup_templates import SweepHfss3D
@@ -83,7 +83,15 @@ def identify_setup(props):
     return False
 
 
-class SweepHFSS(object):
+class SweepCommon:
+    def __repr__(self):
+        return f"{self.setup_name} : {self.name}"
+
+    def __str__(self):
+        return f"{self.setup_name} : {self.name}"
+
+
+class SweepHFSS(SweepCommon):
     """Initializes, creates, and updates sweeps in HFSS.
 
     Parameters
@@ -104,7 +112,7 @@ class SweepHFSS(object):
     >>> hfss = Hfss(version=version, project=proj, design=gtemDesign, solution_type=solutiontype,
                     name=name, new_desktop=False, close_on_exit=False)
     >>> hfss_setup = hfss.setups[0]
-    >>> hfss_sweep = SweepHFSS(hfss_setup, 'Sweep', sweep_type ='Interpolating', props=None)
+    >>> hfss_sweep = SweepHFSS(hfss_setup, "Sweep", sweep_type="Interpolating", props=None)
 
     """
 
@@ -254,8 +262,8 @@ class SweepHFSS(object):
         >>> sweep = setup.add_sweep()
         >>> sweep.change_type("Interpolating")
         >>> sweep.change_range("LinearStep", 1.1, 2.1, 0.4, "GHz")
-        >>> sweep.add_subrange("LinearCount",1,1.5,5,"MHz")
-        >>> sweep.add_subrange("LogScale",1,3,10,"GHz")
+        >>> sweep.add_subrange("LinearCount", 1, 1.5, 5, "MHz")
+        >>> sweep.add_subrange("LogScale", 1, 3, 10, "GHz")
 
         """
         if range_type == "LinearCount" or range_type == "LinearStep" or range_type == "LogScale":
@@ -353,7 +361,7 @@ class SweepHFSS(object):
         return arg
 
 
-class SweepHFSS3DLayout(object):
+class SweepHFSS3DLayout(SweepCommon):
     """Initializes, creates, and updates sweeps in HFSS 3D Layout.
 
     Parameters
@@ -606,7 +614,7 @@ class SweepHFSS3DLayout(object):
         return arg
 
 
-class SweepMatrix(object):
+class SweepMatrix(SweepCommon):
     """Initializes, creates, and updates sweeps in Q3D.
 
     Parameters
@@ -841,7 +849,7 @@ class SweepMatrix(object):
         return arg
 
 
-class SweepMaxwellEC(object):
+class SweepMaxwellEC(SweepCommon):
     """Initializes, creates, and updates sweeps in Maxwell Eddy Current.
 
     Parameters

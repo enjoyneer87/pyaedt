@@ -22,9 +22,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from ansys.aedt.core.generic.constants import SolutionsMaxwell3D
 from ansys.aedt.core.generic.data_handlers import _dict2arg
-from ansys.aedt.core.generic.general_methods import generate_unique_name
+from ansys.aedt.core.generic.file_utils import generate_unique_name
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
+from ansys.aedt.core.generic.settings import settings
 from ansys.aedt.core.modeler.cad.elements_3d import BinaryTreeNode
 from ansys.aedt.core.modules.boundary.common import BoundaryCommon
 from ansys.aedt.core.modules.boundary.common import BoundaryProps
@@ -46,13 +48,12 @@ class MaxwellParameters(BoundaryCommon, BinaryTreeNode):
 
     Examples
     --------
-
     Create a matrix in Maxwell3D return a ``ansys.aedt.core.modules.boundary.common.BoundaryObject``
 
     >>> from ansys.aedt.core import Maxwell2d
     >>> maxwell_2d = Maxwell2d()
-    >>> coil1 = maxwell_2d.modeler.create_rectangle([8.5,1.5, 0],[8, 3],True,"Coil_1","vacuum")
-    >>> coil2 = maxwell_2d.modeler.create_rectangle([8.5,1.5, 0],[8, 3],True,"Coil_2","vacuum")
+    >>> coil1 = maxwell_2d.modeler.create_rectangle([8.5, 1.5, 0], [8, 3], True, "Coil_1", "vacuum")
+    >>> coil2 = maxwell_2d.modeler.create_rectangle([8.5, 1.5, 0], [8, 3], True, "Coil_2", "vacuum")
     >>> maxwell_2d.assign_matrix(["Coil_1", "Coil_2"])
     """
 
@@ -77,7 +78,9 @@ class MaxwellParameters(BoundaryCommon, BinaryTreeNode):
             Dictionary of reduced matrices where the key is the name of the parent matrix
             and the values are in a list of reduced matrix groups.
         """
-        if self._app.solution_type == "EddyCurrent":
+        aedt_version = settings.aedt_version
+        maxwell_solutions = SolutionsMaxwell3D.versioned(aedt_version)
+        if self._app.solution_type in [maxwell_solutions.EddyCurrent, maxwell_solutions.ACMagnetic]:
             self.__reduced_matrices = {}
             cc = self._app.odesign.GetChildObject("Parameters")
             parents = cc.GetChildNames()
@@ -94,7 +97,6 @@ class MaxwellParameters(BoundaryCommon, BinaryTreeNode):
 
     @property
     def _child_object(self):
-
         cc = self._app.odesign.GetChildObject("Parameters")
         child_object = None
         if self._name in cc.GetChildNames():
@@ -201,7 +203,9 @@ class MaxwellParameters(BoundaryCommon, BinaryTreeNode):
 
     @pyaedt_function_handler()
     def _create_matrix_reduction(self, red_type, sources, matrix_name=None, join_name=None):
-        if not self._app.solution_type == "EddyCurrent":
+        aedt_version = settings.aedt_version
+        maxwell_solutions = SolutionsMaxwell3D.versioned(aedt_version)
+        if self._app.solution_type not in [maxwell_solutions.EddyCurrent, maxwell_solutions.ACMagnetic]:
             self._app.logger.error("Matrix reduction is possible only in Eddy current solvers.")
             return False, False
         if not matrix_name:
@@ -267,7 +271,24 @@ class MaxwellParameters(BoundaryCommon, BinaryTreeNode):
 
 
 class MaxwellMatrix(object):
+    """
+    Provides methods to interact with reduced matrices in Maxwell.
+
+    This class allows sources in a reduced matrix to be listed, updated, and deleted.
+
+    Parameters
+    ----------
+    app : :class:`pyaedt.application.AnalysisMaxwell`
+        Parent Maxwell application instance.
+    parent_name : str
+        Name of the parent matrix.
+    reduced_name : str
+        Name of the reduced matrix.
+
+    """
+
     def __init__(self, app, parent_name, reduced_name):
+        """Initialize Maxwell matrix."""
         self._app = app
         self.parent_matrix = parent_name
         self.name = reduced_name
@@ -276,7 +297,9 @@ class MaxwellMatrix(object):
     @property
     def sources(self):
         """List of matrix sources."""
-        if self._app.solution_type == "EddyCurrent":
+        aedt_version = settings.aedt_version
+        maxwell_solutions = SolutionsMaxwell3D.versioned(aedt_version)
+        if self._app.solution_type in [maxwell_solutions.EddyCurrent, maxwell_solutions.ACMagnetic]:
             sources = (
                 self._app.odesign.GetChildObject("Parameters")
                 .GetChildObject(self.parent_matrix)

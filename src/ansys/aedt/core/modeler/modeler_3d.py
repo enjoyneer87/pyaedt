@@ -29,10 +29,12 @@ import os.path
 import warnings
 
 from ansys.aedt.core.application.variables import generate_validation_errors
-from ansys.aedt.core.generic.errors import GrpcApiError
-from ansys.aedt.core.generic.general_methods import generate_unique_name
-from ansys.aedt.core.generic.general_methods import open_file
+from ansys.aedt.core.generic.constants import Axis
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
+from ansys.aedt.core.internal.checks import ERROR_GRAPHICS_REQUIRED
+from ansys.aedt.core.internal.errors import GrpcApiError
 from ansys.aedt.core.modeler.cad.primitives_3d import Primitives3D
 from ansys.aedt.core.modeler.geometry_operators import GeometryOperators
 from ansys.aedt.core.visualization.advanced.misc import nastran_to_stl
@@ -314,10 +316,10 @@ class Modeler3D(Primitives3D):
                 arg2 += ["MeshRegions:=", mesh_regions]
         else:
             if excitations is None:
-                excitations = self._app.excitations
+                excitations = self._app.excitation_names
                 if self._app.design_type == "HFSS":
                     exc = self._app.get_oo_name(self._app.odesign, "Excitations")
-                    if exc and exc[0] not in self._app.excitations:
+                    if exc and exc[0] not in self._app.excitation_names:
                         excitations.extend(exc)
             excitations = list(set([i.split(":")[0] for i in excitations]))
             if excitations:
@@ -552,10 +554,10 @@ class Modeler3D(Primitives3D):
             if excitations:
                 excitations = excitations
             else:
-                excitations = self._app.excitations
+                excitations = self._app.excitation_names
                 if self._app.design_type == "HFSS":
                     exc = self._app.get_oo_name(self._app.odesign, "Excitations")
-                    if exc and exc[0] not in self._app.excitations:
+                    if exc and exc[0] not in self._app.excitation_names:
                         excitations.extend(exc)
             excitations = list(set([i.split(":")[0] for i in excitations]))
             if excitations:
@@ -610,8 +612,8 @@ class Modeler3D(Primitives3D):
         origin : list
             List of ``[x, y, z]`` coordinates for the starting position.
         axis : int
-            Coordinate system AXIS (integer ``0`` for X, ``1`` for Y, ``2`` for Z) or
-            the :class:`Application.AXIS` enumerator.
+            Coordinate system axis (integer ``0`` for X, ``1`` for Y, ``2`` for Z) or value of
+            the :class:`ansys.aedt.core.generic.constants.Axis` enumerator.
         inner_radius : float, optional
             Inner coax radius. The default is ``1``.
         outer_radius : float, optional
@@ -643,10 +645,12 @@ class Modeler3D(Primitives3D):
         This example shows how to create a Coaxial Along X Axis waveguide.
 
         >>> from ansys.aedt.core import Hfss
+        >>> from ansys.aedt.core.generic.constants import Axis
         >>> app = Hfss()
-        >>> position = [0,0,0]
-        >>> coax = app.modeler.create_coaxial(position,app.AXIS.X,inner_radius=0.5,outer_radius=0.8,diel_radius=0.78,
-        ... length=50)
+        >>> position = [0, 0, 0]
+        >>> coax = app.modeler.create_coaxial(
+        ...     position, Axis.X, inner_radius=0.5, outer_radius=0.8, diel_radius=0.78, length=50
+        ... )
 
         """
         if not (outer_radius > diel_radius and diel_radius > inner_radius):
@@ -689,7 +693,7 @@ class Modeler3D(Primitives3D):
             List of ``[x, y, z]`` coordinates for the original position.
         wg_direction_axis : int
             Coordinate system axis (integer ``0`` for X, ``1`` for Y, ``2`` for Z) or
-            the :class:`Application.AXIS` enumerator.
+            the :class:`ansys.aedt.core.generic.constants.Axis` enumerator.
         wgmodel : str, optional
             Waveguide model. The default is ``"WG0"``.
         wg_length : float, optional
@@ -724,10 +728,10 @@ class Modeler3D(Primitives3D):
         This example shows how to create a WG9 waveguide.
 
         >>> from ansys.aedt.core import Hfss
+        >>> from ansys.aedt.core.generic.constants import Axis
         >>> app = Hfss()
         >>> position = [0, 0, 0]
-        >>> wg1 = app.modeler.create_waveguide(position, app.AXIS.,
-        ...                                    wgmodel="WG9", wg_length=2000)
+        >>> wg1 = app.modeler.create_waveguide(position, Axis.X, wgmodel="WG9", wg_length=2000)
 
 
         """
@@ -796,7 +800,7 @@ class Modeler3D(Primitives3D):
             else:
                 w = self._app.value_with_units(wgwidth)
                 wb = self._app.value_with_units(wgwidth) + " + 2*" + self._app.value_with_units(wg_thickness)
-            if wg_direction_axis == self._app.AXIS.Z:
+            if wg_direction_axis == Axis.Z:
                 airbox = self.create_box(origin, [w, h, wg_length])
 
                 if isinstance(wg_thickness, str):
@@ -806,7 +810,7 @@ class Modeler3D(Primitives3D):
                     origin[0] -= wg_thickness
                     origin[1] -= wg_thickness
 
-            elif wg_direction_axis == self._app.AXIS.Y:
+            elif wg_direction_axis == Axis.Y:
                 airbox = self.create_box(origin, [w, wg_length, h])
 
                 if isinstance(wg_thickness, str):
@@ -833,9 +837,9 @@ class Modeler3D(Primitives3D):
                 p2 = self.create_object_from_face(airbox.faces[maxi].id)
             if not name:
                 name = generate_unique_name(wgmodel)
-            if wg_direction_axis == self._app.AXIS.Z:
+            if wg_direction_axis == Axis.Z:
                 wgbox = self.create_box(origin, [wb, hb, wg_length], name=name)
-            elif wg_direction_axis == self._app.AXIS.Y:
+            elif wg_direction_axis == Axis.Y:
                 wgbox = self.create_box(origin, [wb, wg_length, hb], name=name)
             else:
                 wgbox = self.create_box(origin, [wg_length, wb, hb], name=name)
@@ -898,9 +902,10 @@ class Modeler3D(Primitives3D):
 
         >>> from ansys.aedt.core import Hfss
         >>> app = Hfss()
-        >>> position = [0,0,0]
-        >>> cone_object = aedtapp.modeler.create_conical_rings(axis='Z', origin=[0, 0, 0],
-        ...                                           bottom_radius=2, top_radius=3, cone_height=4, ring_height=0.1)
+        >>> position = [0, 0, 0]
+        >>> cone_object = aedtapp.modeler.create_conical_rings(
+        ...     axis="Z", origin=[0, 0, 0], bottom_radius=2, top_radius=3, cone_height=4, ring_height=0.1
+        ... )
 
         """
         if bottom_radius <= top_radius:
@@ -1309,7 +1314,10 @@ class Modeler3D(Primitives3D):
 
         self.logger.info("Done...")
         if plot_before_importing:
-            import pyvista as pv
+            try:
+                import pyvista as pv
+            except ImportError:
+                raise ImportError(ERROR_GRAPHICS_REQUIRED)
 
             self.logger.info("Viewing Geometry...")
             # view results

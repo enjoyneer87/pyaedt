@@ -21,36 +21,21 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-
 from copy import copy
 import itertools
 import os
 import re
-import subprocess  # nosec
+import tempfile
 import warnings
 
+import numpy as np
+
+from ansys.aedt.core import Edb
 from ansys.aedt.core.aedt_logger import pyaedt_logger as logger
-from ansys.aedt.core.generic.aedt_versions import aedt_versions
-from ansys.aedt.core.generic.general_methods import open_file
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-
-try:
-    import numpy as np
-except ImportError:  # pragma: no cover
-    warnings.warn(
-        "The NumPy module is required to run some functionalities of TouchstoneData.\n"
-        "Install with \n\npip install numpy"
-    )
-    np = None
-
-try:
-    import matplotlib.pyplot as plt
-except ImportError:  # pragma: no cover
-    warnings.warn(
-        "The Matplotlib module is required to run functionalities of TouchstoneData.\n"
-        "Install with \n\npip install matplotlib"
-    )
-    plt = None
+from ansys.aedt.core.internal.aedt_versions import aedt_versions
+from ansys.aedt.core.internal.checks import graphics_required
 
 try:
     import skrf as rf
@@ -60,7 +45,6 @@ except ImportError:  # pragma: no cover
         "Install with \n\npip install scikit-rf"
     )
     rf = None
-
 
 REAL_IMAG = "RI"
 MAG_ANGLE = "MA"
@@ -113,8 +97,60 @@ class TouchstoneData(rf.Network):
         self.log_x = True
 
     @pyaedt_function_handler()
+    def reduce(self, ports, output_file=None, reordered=True):
+        """Reduce the Touchstone file and export it.
+
+        Parameters
+        ----------
+        ports : list
+            List of ports or port indexes to use for the reduction.
+        output_file : str, optional
+            Output file path. The default is ``None``.
+        reordered : bool, optional
+            Whether to reorder the ports in the output file with given input order or not. The default is ``True``.
+
+        Returns
+        -------
+        str
+            Output file path
+
+        """
+        temp_touch = os.path.join(tempfile.gettempdir(), f"temp_touchstone.s{len(self.port_names)}p")
+        self.write_touchstone(temp_touch)
+        network = rf.Network(temp_touch)
+        reduced = []
+        reduced_names = []
+        for p in ports:
+            if isinstance(p, str) and p in self.port_names:
+                reduced.append(self.port_names.index(p))
+                reduced_names.append(p)
+            elif isinstance(p, int) and p < len(self.port_names):
+                reduced.append(p)
+                reduced_names.append(self.port_names[p])
+        if reordered and reduced != sorted(reduced):
+            network = network.renumbered(reduced, sorted(reduced))
+        reduced_network = network.subnetwork(sorted(reduced))
+
+        if not output_file:
+            output_file = temp_touch[:-4] + f"_reduced.s{len(reduced)}p"
+        elif f"s{len(reduced)}p" not in output_file:
+            logger.error(f"Wrong number of ports in output file name. Ports should be s{len(reduced)}p")
+            return
+        # Save the reduced 4-port network to a new Touchstone file
+        reduced_network.write_touchstone(output_file)
+
+        return output_file
+
+    @pyaedt_function_handler()
     def get_coupling_in_range(
-        self, start_frequency=1e9, low_loss=-40, high_loss=-60, frequency_sample=5, output_file=None
+        self,
+        start_frequency=1e9,
+        low_loss=-40,
+        high_loss=-60,
+        frequency_sample=5,
+        output_file=None,
+        aedb_path=None,
+        design_name=None,
     ):
         """Get coupling losses, excluding return loss, that has at least one frequency point between a range of
         losses.
@@ -131,6 +167,10 @@ class TouchstoneData(rf.Network):
             Specify frequency sample at which coupling check will be done. The default is ``5``.
         output_file : path, optional
             Output file path to save where identified coupling will be listed. The default is ``None``.
+        aedb_path : path, optional
+            Full path to the ``aedb`` folder. This project is used to identify ports location. The default is ``None``.
+        design_name : string, optional
+            Design name from the project where to identify ports location. The default is ``None``.
 
         Returns
         -------
@@ -138,7 +178,6 @@ class TouchstoneData(rf.Network):
             List of S parameters in the range [high_loss, low_loss] to plot.
 
         """
-
         nb_freq = self.frequency.npoints
         k = 0
         k_start = 0
@@ -151,32 +190,66 @@ class TouchstoneData(rf.Network):
             else:
                 k = k + 1
 
-        port_names = self.port_names
-        nb_port = len(port_names)
         s_db = self.s_db[:, :, :]
         temp_list = []
         temp_file = []
-
-        for i in range(nb_port):
-            for j in range(i, nb_port):
-                if i == j:
-                    continue
-                for k in range(k_start, nb_freq, frequency_sample):
-                    loss = s_db[k, i, j]
-                    if high_loss < loss < low_loss:
-                        temp_list.append((i, j))
-                        sxy = f"S({self.port_names[i]} , {self.port_names[j]})"
-                        line = f"{sxy} Loss = {loss:.2f} dB Freq = {(self.f[k] * 1e-9):.3f} GHz\n"
-                        temp_file.append(line)
-                        break
+        if aedb_path is not None:
+            edbapp = Edb(edbpath=aedb_path, cellname=design_name, edbversion=aedt_versions.latest_version)
+            for i in range(self.number_of_ports):
+                for j in range(i, self.number_of_ports):
+                    if i == j:
+                        continue
+                    for k in range(k_start, nb_freq, frequency_sample):
+                        loss = s_db[k, i, j]
+                        if high_loss < loss < low_loss:
+                            temp_list.append((i, j))
+                            port1 = self.port_names[i]
+                            port2 = self.port_names[j]
+                            # This if statement is mandatory as the codeword to use is different with regard to
+                            # port type: Circuit(.location) or Gap(.position)
+                            if edbapp.ports[port1].hfss_type == "Circuit":
+                                loc_port_1 = edbapp.ports[port1].location
+                            else:
+                                loc_port_1 = edbapp.ports[port1].position
+                            if edbapp.ports[port2].hfss_type == "Circuit":
+                                loc_port_2 = edbapp.ports[port2].location
+                            else:
+                                loc_port_2 = edbapp.ports[port2].position
+                            # This if statement is mandatory as some port return None for port location which will
+                            # issue error on the formatting
+                            if loc_port_1 is not None:
+                                loc_port_1[0] = f"{loc_port_1[0]:.4f}"
+                                loc_port_1[1] = f"{loc_port_1[1]:.4f}"
+                            if loc_port_2 is not None:
+                                loc_port_2[0] = f"{loc_port_2[0]:.4f}"
+                                loc_port_2[1] = f"{loc_port_2[1]:.4f}"
+                            sxy = f"S({port1},{port2})"
+                            ports_location = f"{port1}: {loc_port_1}, {port2}: {loc_port_2}"
+                            line = f"{sxy} Loss= {loss:.2f}dB Freq= {(self.f[k] * 1e-9):.3f}GHz, {ports_location}\n"
+                            temp_file.append(line)
+                            break
+            edbapp.close()
+        else:
+            for i in range(self.number_of_ports):
+                for j in range(i, self.number_of_ports):
+                    if i == j:
+                        continue
+                    for k in range(k_start, nb_freq, frequency_sample):
+                        loss = s_db[k, i, j]
+                        if high_loss < loss < low_loss:
+                            temp_list.append((i, j))
+                            sxy = f"S({self.port_names[i]},{self.port_names[j]})"
+                            line = f"{sxy} Loss= {loss:.2f}dB Freq= {(self.f[k] * 1e-9):.3f}GHz\n"
+                            temp_file.append(line)
+                            break
         if output_file is not None:
             if os.path.exists(output_file):
                 logger.info("File " + output_file + " exist and we be replace by new one.")
-                with open_file(output_file, "w") as f:
-                    for s in temp_file:
-                        f.write(s)
-                logger.info("File " + output_file + " created.")
-
+            with open_file(output_file, "w") as f:
+                for s in temp_file:
+                    f.write(s)
+            logger.info("File " + output_file + " created.")
+            f.close()
         return temp_list
 
     @pyaedt_function_handler()
@@ -209,6 +282,7 @@ class TouchstoneData(rf.Network):
                         temp_list.append(i)
         return temp_list
 
+    @graphics_required
     def plot_insertion_losses(self, threshold=-3, plot=True):
         """Plot all insertion losses.
 
@@ -226,6 +300,8 @@ class TouchstoneData(rf.Network):
         list
             List of tuples representing insertion loss excitations.
         """
+        import matplotlib.pyplot as plt
+
         temp_list = self.get_insertion_loss_index(threshold=threshold)
         if plot:
             for i in temp_list:
@@ -233,6 +309,7 @@ class TouchstoneData(rf.Network):
             plt.show()
         return temp_list
 
+    @graphics_required
     def plot(self, index_couples=None, show=True):
         """Plot a list of curves.
 
@@ -247,6 +324,8 @@ class TouchstoneData(rf.Network):
         -------
         :class:`matplotlib.plt`
         """
+        import matplotlib.pyplot as plt
+
         if not index_couples:
             index_couples = self.port_tuples[:]
 
@@ -256,6 +335,7 @@ class TouchstoneData(rf.Network):
             plt.show()
         return True
 
+    @graphics_required
     def plot_return_losses(self):
         """Plot all return losses.
 
@@ -263,6 +343,8 @@ class TouchstoneData(rf.Network):
         -------
         bool
         """
+        import matplotlib.pyplot as plt
+
         for i in np.arange(self.number_of_ports):
             self.plot_s_db(i, i, logx=self.log_x)
         plt.show()
@@ -431,6 +513,7 @@ class TouchstoneData(rf.Network):
                     values.append([self.port_names.index(i), self.port_names.index(k)])
         return values
 
+    @graphics_required
     def plot_next_xtalk_losses(self, tx_prefix=""):
         """Plot all next crosstalk curves.
 
@@ -443,6 +526,8 @@ class TouchstoneData(rf.Network):
         -------
         bool
         """
+        import matplotlib.pyplot as plt
+
         index = self.get_next_xtalk_index(tx_prefix=tx_prefix)
 
         for ind in index:
@@ -450,6 +535,7 @@ class TouchstoneData(rf.Network):
         plt.show()
         return True
 
+    @graphics_required
     def plot_fext_xtalk_losses(self, tx_prefix, rx_prefix, skip_same_index_couples=True):
         """Plot all fext crosstalk curves.
 
@@ -466,6 +552,8 @@ class TouchstoneData(rf.Network):
         -------
         bool
         """
+        import matplotlib.pyplot as plt
+
         index = self.get_fext_xtalk_index_from_prefix(
             tx_prefix=tx_prefix, rx_prefix=rx_prefix, skip_same_index_couples=skip_same_index_couples
         )
@@ -475,6 +563,7 @@ class TouchstoneData(rf.Network):
         return True
 
     @pyaedt_function_handler()
+    @graphics_required
     def get_worst_curve(self, freq_min=None, freq_max=None, worst_is_higher=True, curve_list=None, plot=True):
         """Analyze a solution data object with multiple curves and find the worst curve.
 
@@ -499,6 +588,8 @@ class TouchstoneData(rf.Network):
         tuple
             Worst element, dictionary of ordered expression.
         """
+        import matplotlib.pyplot as plt
+
         return_loss_freq = [float(i.center) for i in list(self.frequency)]
         if not freq_min:
             lower_id = 0
@@ -552,6 +643,12 @@ def read_touchstone(input_file):
 def check_touchstone_files(input_dir="", passivity=True, causality=True):
     """Check passivity and causality for all Touchstone files included in the folder.
 
+    .. warning::
+
+        Do not execute this function with untrusted function argument, environment
+        variables or pyaedt global settings.
+        See the :ref:`security guide<ref_security_consideration>` for details.
+
     Parameters
     ----------
     input_dir : str
@@ -570,6 +667,8 @@ def check_touchstone_files(input_dir="", passivity=True, causality=True):
         is a string with the log information.
 
     """
+    import subprocess  # nosec
+
     out = {}
     snp_files = find_touchstone_files(input_dir)
     if not snp_files:
@@ -589,9 +688,7 @@ def check_touchstone_files(input_dir="", passivity=True, causality=True):
 
         cmd.append(path)
         my_env = os.environ.copy()
-        result = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=my_env, text=True, check=True
-        )  # nosec
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=my_env, text=True, check=True)  # nosec
         output_lst = result.stdout.splitlines()
 
         for line in output_lst:
@@ -637,7 +734,7 @@ def find_touchstone_files(input_dir):
         return out
     pat_snp = re.compile(r"\.s\d+p$", re.IGNORECASE)
     files = {f: os.path.join(input_dir, f) for f in os.listdir(input_dir) if re.search(pat_snp, f)}
-    pat_ts = re.compile("\.ts$")
+    pat_ts = re.compile(r"\.ts$")
     for f in os.listdir(input_dir):
         if re.search(pat_ts, f):
             files[f] = os.path.abspath(os.path.join(input_dir, f))

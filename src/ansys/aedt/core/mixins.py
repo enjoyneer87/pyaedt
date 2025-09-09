@@ -22,9 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from ansys.aedt.core.generic.errors import AEDTRuntimeError
-from ansys.aedt.core.generic.errors import GrpcApiError
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
+from ansys.aedt.core.internal.errors import AEDTRuntimeError
+from ansys.aedt.core.internal.errors import GrpcApiError
 from ansys.aedt.core.modules.boundary.common import BoundaryObject
 
 
@@ -41,10 +41,10 @@ class CreateBoundaryMixin:
 
     >>> class MyClass(CreateBoundaryMixin):
     >>>     def _create_boundary(self):
-    >>>         # Use default behavior
+    >>> # Use default behavior
     >>>         if boundary_type not in ("SpecificString"):
     >>>             return super()._create_boundary(name, props, boundary_type)
-    >>>         # Custom implementation to create boundary conditions
+    >>> # Custom implementation to create boundary conditions
     >>>         else:
     >>>             pass
     """

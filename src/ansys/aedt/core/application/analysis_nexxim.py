@@ -21,13 +21,15 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import warnings
 
 from ansys.aedt.core.application.analysis import Analysis
+from ansys.aedt.core.generic.configurations import ConfigurationsNexxim
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.generic.settings import settings
 from ansys.aedt.core.modeler.circuits.object_3d_circuit import CircuitComponent
+from ansys.aedt.core.modeler.circuits.object_3d_circuit import Excitations
 from ansys.aedt.core.modules.boundary.circuit_boundary import CurrentSinSource
-from ansys.aedt.core.modules.boundary.circuit_boundary import Excitations
 from ansys.aedt.core.modules.boundary.circuit_boundary import PowerIQSource
 from ansys.aedt.core.modules.boundary.circuit_boundary import PowerSinSource
 from ansys.aedt.core.modules.boundary.circuit_boundary import Sources
@@ -88,11 +90,22 @@ class FieldAnalysisCircuit(Analysis):
 
         self._modeler = None
         self._post = None
-        self._internal_excitations = None
+        self._internal_excitations = {}
         self._internal_sources = None
+        self._configurations = ConfigurationsNexxim(self)
         if not settings.lazy_load:
             self._modeler = self.modeler
             self._post = self.post
+
+    @property
+    def configurations(self):
+        """Property to import and export configuration files.
+
+        Returns
+        -------
+        :class:`ansys.aedt.core.generic.configurations.Configurations`
+        """
+        return self._configurations
 
     @pyaedt_function_handler(setupname="name")
     def delete_setup(self, name):
@@ -112,7 +125,7 @@ class FieldAnalysisCircuit(Analysis):
         ----------
         >>> oModule.RemoveSimSetup
         """
-        if name in self.existing_analysis_setups:
+        if name in self.setup_names:
             self.oanalysis.RemoveSimSetup([name])
             for s in self.setups:
                 if s.name == name:
@@ -185,31 +198,24 @@ class FieldAnalysisCircuit(Analysis):
         return self._post
 
     @property
-    def existing_analysis_sweeps(self):
-        """Analysis setups.
-
-        References
-        ----------
-        >>> oModule.GetAllSolutionSetups"""
-        return self.existing_analysis_setups
-
-    @property
     def existing_analysis_setups(self):
-        """Analysis setups.
+        """Existing analysis setups.
+
+        .. deprecated:: 0.15.0
+            Use :func:`setup_names` from setup object instead.
+
+        Returns
+        -------
+        list of str
+            List of all analysis setups in the design.
 
         References
         ----------
-        >>> oModule.GetAllSolutionSetups"""
-        setups = self.oanalysis.GetAllSolutionSetups()
-        return setups
-
-    @property
-    def nominal_sweep(self):
-        """Nominal sweep."""
-        if self.existing_analysis_setups:
-            return self.existing_analysis_setups[0]
-        else:
-            return ""
+        >>> oModule.GetSetups
+        """
+        msg = "`existing_analysis_setups` is deprecated. Use `setup_names` method from setup object instead."
+        warnings.warn(msg, DeprecationWarning)
+        return self.setup_names
 
     @property
     def modeler(self):
@@ -234,8 +240,9 @@ class FieldAnalysisCircuit(Analysis):
 
         References
         ----------
-        >>> oModule.GetAllSolutionSetups"""
-        return self.oanalysis.GetAllSolutionSetups()
+        >>> oModule.GetAllSolutionSetups
+        """
+        return [i.split(" : ")[0] for i in self.oanalysis.GetAllSolutionSetups()]
 
     @property
     def source_names(self):
@@ -310,39 +317,67 @@ class FieldAnalysisCircuit(Analysis):
 
     @property
     def excitations(self):
-        """List of port names.
+        """Get all excitation names.
+
+        .. deprecated:: 0.15.0
+           Use :func:`excitation_names` property instead.
 
         Returns
         -------
         list
-            List of excitation names.
+            List of excitation names. Excitations with multiple modes will return one
+            excitation for each mode.
 
         References
         ----------
-        >>> oModule.GetAllPorts
+        >>> oModule.GetExcitations
         """
-        ports = [p.replace("IPort@", "").split(";")[0] for p in self.modeler.oeditor.GetAllPorts() if "IPort@" in p]
-        return ports
+        mess = "The property `excitations` is deprecated.\n"
+        mess += " Use `app.excitation_names` directly."
+        warnings.warn(mess, DeprecationWarning)
+        return self.excitation_names
 
     @property
-    def excitation_objects(self):
-        """List of port objects.
+    def excitation_names(self):
+        """Get all excitation names.
 
         Returns
         -------
-        dict
-            List of port objects.
+        list
+            List of excitation names. Excitations with multiple modes will return one
+            excitation for each mode.
+
+        References
+        ----------
+        >>> oModule.GetExcitations
+        """
+        return [p.replace("IPort@", "").split(";")[0] for p in self.modeler.oeditor.GetAllPorts() if "IPort@" in p]
+
+    @property
+    def design_excitations(self):
+        """Get all excitation.
+
+        Returns
+        -------
+        dict[str, :class:`ansys.aedt.core.modules.boundary.common.BoundaryObject`]
+           Excitation boundaries.
+
+        References
+        ----------
+        >>> oModule.GetExcitations
         """
         props = {}
+
         if not self._internal_excitations:
-            for port in self.excitations:
-                props[port] = Excitations(self, port)
+            for comp in self.modeler.schematic.components.values():
+                if comp.name in self.excitation_names:
+                    props[comp.name] = comp
             self._internal_excitations = props
         else:
             props = self._internal_excitations
-            if not sorted(list(props.keys())) == sorted(self.excitations):
+            if not sorted(list(props.keys())) == sorted(self.excitation_names):
                 a = set(str(x) for x in props.keys())
-                b = set(str(x) for x in self.excitations)
+                b = set(str(x) for x in self.excitation_names)
                 if len(a) == len(b):
                     unmatched_new_name = list(b - a)[0]
                     unmatched_old_name = list(a - b)[0]
@@ -351,11 +386,11 @@ class FieldAnalysisCircuit(Analysis):
                 else:
                     if len(a) > len(b):
                         for old_port in props.keys():
-                            if old_port not in self.excitations:
+                            if old_port not in self.excitation_names:
                                 del props[old_port]
                                 return props
                     else:
-                        for new_port in self.excitations:
+                        for new_port in self.excitation_names:
                             if new_port not in props.keys():
                                 props[new_port] = Excitations(self, new_port)
         return props
@@ -395,10 +430,10 @@ class FieldAnalysisCircuit(Analysis):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Circuit
+        >>> from ansys.aedt.core.generic.constants import Setups
         >>> app = Circuit()
-        >>> app.create_setup(name="Setup1",setup_type=app.SETUPS.NexximLNA,Data="LINC 0GHz 4GHz 501")
+        >>> app.create_setup(name="Setup1", setup_type=Setups.NexximLNA, Data="LINC 0GHz 4GHz 501")
         """
         if setup_type is None:
             setup_type = self.design_solutions.default_setup

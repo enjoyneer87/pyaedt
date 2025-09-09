@@ -22,8 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""Test utility functions of PyAEDT.
-"""
+"""Test utility functions of PyAEDT."""
 
 import logging
 import os
@@ -32,8 +31,8 @@ from unittest.mock import MagicMock
 from unittest.mock import PropertyMock
 from unittest.mock import patch
 
-from ansys.aedt.core.generic.checks import AEDTRuntimeError
-from ansys.aedt.core.generic.checks import min_aedt_version
+import pytest
+
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.generic.settings import ALLOWED_AEDT_ENV_VAR_SETTINGS
 from ansys.aedt.core.generic.settings import ALLOWED_GENERAL_SETTINGS
@@ -41,7 +40,8 @@ from ansys.aedt.core.generic.settings import ALLOWED_LOG_SETTINGS
 from ansys.aedt.core.generic.settings import ALLOWED_LSF_SETTINGS
 from ansys.aedt.core.generic.settings import Settings
 from ansys.aedt.core.generic.settings import settings
-import pytest
+from ansys.aedt.core.internal.checks import AEDTRuntimeError
+from ansys.aedt.core.internal.checks import min_aedt_version
 
 SETTINGS_RELEASE_ON_EXCEPTION = settings.release_on_exception
 SETTINGS_ENABLE_ERROR_HANDLER = settings.enable_error_handler
@@ -67,7 +67,7 @@ def foo(trigger_exception=True):
 
 
 @patch.object(Settings, "logger", new_callable=PropertyMock)
-@patch("ansys.aedt.core.generic.desktop_sessions._desktop_sessions")
+@patch("ansys.aedt.core.internal.desktop_sessions._desktop_sessions")
 def test_handler_release_on_exception_called(mock_sessions, mock_logger):
     """Test handler while activating error handler."""
     mock_session = MagicMock()
@@ -85,7 +85,7 @@ def test_handler_release_on_exception_called(mock_sessions, mock_logger):
 
 
 @patch.object(Settings, "logger", new_callable=PropertyMock)
-@patch("ansys.aedt.core.generic.desktop_sessions._desktop_sessions")
+@patch("ansys.aedt.core.internal.desktop_sessions._desktop_sessions")
 def test_handler_release_on_exception_not_called(mock_sessions, mock_logger):
     """Test handler while deactivating error handler."""
     mock_session = MagicMock()
@@ -108,7 +108,7 @@ def test_handler_enable_error_handler(mock_logger):
     """Test handler while activating/deactivating error handler."""
     mock_logger.return_value = MagicMock()
     settings.enable_error_handler = True
-    assert foo() == False
+    assert not foo()
 
     settings.enable_error_handler = False
     with pytest.raises(Exception) as exec_info:
@@ -219,21 +219,25 @@ def test_settings_attributes():
         _ = getattr(default_settings, "aedt_environment_variables")[attr]
 
 
-def test_settings_check_allowed_attributes():
+def test_settings_check_allowed_properties():
     """Test that every non python setting is an allowed settings."""
+    import inspect
+
     default_settings = Settings()
     # All allowed attributes
-    allowed_attrs_expected = (
+    allowed_properties_expected = (
         ALLOWED_LOG_SETTINGS + ALLOWED_GENERAL_SETTINGS + ALLOWED_LSF_SETTINGS + ["aedt_environment_variables"]
     )
     # Check attributes that are not related to Python objects (otherwise they are not 'allowed')
-    attrs_ignored = ["formatter", "logger", "remote_rpc_session", "time_tick"]
-    settings_attrs = (
-        key.split("_Settings__")[-1] for key in default_settings.__dict__.keys() if key.startswith("_Settings__")
-    )
-    settings_attrs = filter(lambda attr: attr not in attrs_ignored, settings_attrs)
+    properties_ignored = ["formatter", "logger", "remote_rpc_session", "time_tick"]
 
-    assert sorted(allowed_attrs_expected) == sorted(settings_attrs)
+    def get_properties(obj):
+        return [name for name, _ in inspect.getmembers(type(obj), lambda v: isinstance(v, property))]
+
+    settings_properties = get_properties(default_settings)
+    settings_properties = filter(lambda attr: attr not in properties_ignored, settings_properties)
+
+    assert sorted(allowed_properties_expected) == sorted(settings_properties)
 
 
 def test_settings_check_allowed_env_variables():
@@ -249,7 +253,7 @@ def test_settings_check_allowed_env_variables():
 
 def test_read_toml(tmp_path):
     """Test loading a TOML file."""
-    from ansys.aedt.core.generic.general_methods import read_toml
+    from ansys.aedt.core.generic.file_utils import read_toml
 
     file_path = tmp_path / "dummy.toml"
     content = """
@@ -267,7 +271,7 @@ def test_read_toml(tmp_path):
 
 def test_write_toml(tmp_path):
     """Test writing a TOML file."""
-    from ansys.aedt.core.generic.general_methods import _create_toml_file
+    from ansys.aedt.core.generic.file_utils import _create_toml_file
 
     file_path = tmp_path / "dummy.toml"
     _create_toml_file(TOML_DATA, file_path)

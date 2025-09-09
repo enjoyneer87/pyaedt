@@ -32,12 +32,12 @@ This module provides all functionalities for common AEDT post processing.
 import os
 import re
 
+from ansys.aedt.core import Quantity
 from ansys.aedt.core.generic.data_handlers import _dict_items_to_list_items
-from ansys.aedt.core.generic.general_methods import generate_unique_name
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import read_configuration_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.general_methods import read_configuration_file
-from ansys.aedt.core.generic.numbers import _units_assignment
-from ansys.aedt.core.visualization.plot.matplotlib import ReportPlotter
+from ansys.aedt.core.generic.numbers_utils import _units_assignment
 from ansys.aedt.core.visualization.post.solution_data import SolutionData
 from ansys.aedt.core.visualization.report.constants import TEMPLATES_BY_DESIGN
 import ansys.aedt.core.visualization.report.emi
@@ -48,6 +48,7 @@ import ansys.aedt.core.visualization.report.standard
 TEMPLATES_BY_NAME = {
     "Standard": ansys.aedt.core.visualization.report.standard.Standard,
     "EddyCurrent": ansys.aedt.core.visualization.report.standard.Standard,
+    "AC Magnetic": ansys.aedt.core.visualization.report.standard.Standard,
     "Modal Solution Data": ansys.aedt.core.visualization.report.standard.Standard,
     "Terminal Solution Data": ansys.aedt.core.visualization.report.standard.Standard,
     "Fields": ansys.aedt.core.visualization.report.field.Fields,
@@ -87,7 +88,7 @@ class PostProcessorCommon(object):
     --------
     >>> from ansys.aedt.core import Q3d
     >>> q3d = Q3d()
-    >>> q.post.get_solution_data(domain="Original")
+    >>> q3d.post.get_solution_data(domain="Original")
     """
 
     def __init__(self, app):
@@ -283,7 +284,7 @@ class PostProcessorCommon(object):
         The context has to be provided as a dictionary where the key is the name of the original matrix
         and the value is the name of the reduced matrix.
         >>> from ansys.aedt.core import Maxwell3d
-        >>> m3d = Maxwell3d(solution_type="EddyCurrent")
+        >>> m3d = Maxwell3d(solution_type="AC Magnetic")
         >>> rectangle1 = m3d.modeler.create_rectangle(0, [0.5, 1.5, 0], [2.5, 5], name="Sheet1")
         >>> rectangle2 = m3d.modeler.create_rectangle(0, [9, 1.5, 0], [2.5, 5], name="Sheet2")
         >>> rectangle3 = m3d.modeler.create_rectangle(0, [16.5, 1.5, 0], [2.5, 5], name="Sheet3")
@@ -292,13 +293,22 @@ class PostProcessorCommon(object):
         >>> m3d.assign_current(rectangle3.faces[0], amplitude=1, name="Cur3")
         >>> L = m3d.assign_matrix(assignment=["Cur1", "Cur2", "Cur3"], matrix_name="Matrix1")
         >>> out = L.join_series(sources=["Cur1", "Cur2"], matrix_name="ReducedMatrix1")
-        >>> expressions = m3d.post.available_report_quantities(report_category="EddyCurrent",
-        ...                                                    display_type="Data Table",
-        ...                                                    context={"Matrix1": "ReducedMatrix1"})
+        >>> expressions = m3d.post.available_report_quantities(
+        ...     report_category="AC Magnetic", display_type="Data Table", context={"Matrix1": "ReducedMatrix1"}
+        ... )
+        >>> expressions = m3d.post.available_report_quantities(
+        ...     report_category="EddyCurrent", display_type="Data Table", context={"Matrix1": "ReducedMatrix1"}
+        ... )
         >>> m3d.release_desktop(False, False)
         """
         if not report_category:
             report_category = self.available_report_types[0]
+        elif self._app.desktop_class.aedt_version_id >= "2025.2" and report_category == "EddyCurrent":
+            # From 2025R2, EddyCurrent category does not exist anymore, but old user code could still try to access
+            # This check allows code back compatibility in the report
+            self.logger.warning("Change the report category to AC Magnetic.")
+            report_category = "AC Magnetic"
+
         if not display_type:
             display_type = self.available_display_types(report_category)[0]
         if not solution and hasattr(self._app, "nominal_adaptive"):
@@ -400,6 +410,7 @@ class PostProcessorCommon(object):
                 context = ["Diff:=", "differential_pairs", "Domain:=", "Sweep"]
         elif self._app.design_type in ["Maxwell 2D", "Maxwell 3D"] and self._app.solution_type in [
             "EddyCurrent",
+            "AC Magnetic",
             "Electrostatic",
         ]:
             if isinstance(context, dict):
@@ -505,7 +516,7 @@ class PostProcessorCommon(object):
                     if this_name:
                         sweep_names.append(this_name)
             if len(sweep_names) > 1:
-                warning_str = "More than one sweep with name '{setup_sweep_name}' found. "
+                warning_str = f"More than one sweep with name '{sweep_name}' found. "
                 warning_str += f"Returning '{sweep_names[0]}'."
                 self.logger.warning(warning_str)
                 return sweep_names[0]
@@ -923,7 +934,7 @@ class PostProcessorCommon(object):
         )
 
     @pyaedt_function_handler(project_dir="project_path")
-    def export_report_to_jpg(self, project_path, plot_name, width=0, height=0, image_format="jpg"):
+    def export_report_to_jpg(self, project_path, plot_name, width=800, height=450, image_format="jpg"):
         """Export plot to an image file.
 
         Parameters
@@ -933,9 +944,9 @@ class PostProcessorCommon(object):
         plot_name : str
             Name of the plot to export.
         width : int, optional
-            Image width. Default is ``0`` which takes Desktop size or 1980 pixel in case of non-graphical mode.
+            Image width. Default is ``800`` which takes Desktop size or 800 pixel.
         height : int, optional
-            Image height. Default is ``0`` which takes Desktop size or 1020 pixel in case of non-graphical mode.
+            Image height. Default is ``450`` which takes Desktop size or 450 pixel.
         image_format : str, optional
             Format of the image file. The default is ``"jpg"``.
 
@@ -949,11 +960,6 @@ class PostProcessorCommon(object):
         >>> oModule.ExportImageToFile
         """
         file_name = os.path.join(project_path, plot_name + "." + image_format)  # name of the image file
-        if self._app.desktop_class.non_graphical:  # pragma: no cover
-            if width == 0:
-                width = 1980
-            if height == 0:
-                height = 1020
         self.oreportsetup.ExportImageToFile(plot_name, file_name, width, height)
         return True
 
@@ -1116,6 +1122,184 @@ class PostProcessorCommon(object):
             ]
         return [plot_name, modal_data, plot_type, setup_sweep_name, ctxt, families_input, arg]
 
+    @pyaedt_function_handler()
+    def _get_report_object(
+        self,
+        expressions=None,
+        setup_sweep_name=None,
+        domain=None,
+        variations=None,
+        primary_sweep_variable=None,
+        secondary_sweep_variable=None,
+        report_category=None,
+        context=None,
+        subdesign_id=None,
+        polyline_points=1001,
+    ):
+        # Setup
+        if not setup_sweep_name:
+            if report_category == "Fields":
+                setup_sweep_name = self._app.nominal_adaptive  # Field report and no sweep name passed.
+            else:
+                setup_sweep_name = self._app.nominal_sweep
+        elif setup_sweep_name in self._app.setup_sweeps_names:
+            legacy_active = self._app.active_setup
+            self._app.active_setup = setup_sweep_name
+            if report_category == "Fields":
+                setup_sweep_name = self._app.nominal_adaptive  # Field report and no sweep name passed.
+            else:
+                setup_sweep_name = self._app.nominal_sweep
+            self._app.active_setup = legacy_active
+        elif setup_sweep_name in ["Last Adaptive", "Adaptive"]:
+            setup_sweep_name = self._app.nominal_adaptive  # Field report and no sweep name passed.
+        else:
+            for k, v in self._app.setup_sweeps_names.items():
+                if setup_sweep_name in v["Sweeps"]:
+                    setup_sweep_name = f"{k} : {setup_sweep_name}"
+                    break
+        setup_name = setup_sweep_name.split(":")[0].strip()
+        if self._app.design_type != "Twin Builder" and setup_name not in self._app.setup_sweeps_names:
+            raise KeyError(f"Setup {setup_name} not available in current design.")
+        # Domain
+        if not domain:
+            domain = "Sweep"
+            if setup_name:
+                if "Time" in self._app.design_setups[setup_name].default_intrinsics:
+                    domain = "Time"
+
+        # Expressions
+        if not expressions:
+            expressions = [
+                i
+                for i in self.available_report_quantities(
+                    report_category=report_category, solution=setup_sweep_name, context=context
+                )
+            ]
+        elif isinstance(expressions, str):
+            expressions = [expressions]
+
+        # Report Category
+        if domain in ["Spectral", "Spectrum"]:
+            report_category = "Spectrum"
+        if not report_category and not self._app.design_solutions.report_type:
+            self.logger.error("Solution not supported")
+            return False
+        elif not report_category:
+            report_category = self._app.design_solutions.report_type
+
+        # Report Class
+        if report_category in TEMPLATES_BY_NAME:
+            report_class = TEMPLATES_BY_NAME[report_category]
+        elif "Fields" in report_category:
+            report_class = TEMPLATES_BY_NAME["Fields"]
+        else:
+            report_class = TEMPLATES_BY_NAME["Standard"]
+
+        # Report creation
+        report = report_class(self, report_category, setup_sweep_name)
+        report.expressions = expressions
+        report.domain = domain
+
+        # Primary/Secondary Sweep Variable
+        if primary_sweep_variable:
+            report.primary_sweep = primary_sweep_variable
+        elif domain == "DCIR":  # pragma: no cover
+            report.primary_sweep = "Index"
+            if variations:
+                variations["Index"] = ["All"]
+            else:  # pragma: no cover
+                variations = {"Index": "All"}
+        if secondary_sweep_variable:
+            report.secondary_sweep = secondary_sweep_variable
+
+        # Variations
+        if not variations:
+            variations = {}
+        if not variations and domain == "Sweep":
+            variations = self._app.available_variations.get_independent_nominal_values()
+        elif not variations and domain != "Sweep":
+            variations = self._app.available_variations.get_independent_nominal_values()
+        if setup_name in self._app.design_setups:
+            for v in self._app.design_setups[setup_name].default_intrinsics.keys():
+                if v not in variations:
+                    variations[v] = "All"
+        if primary_sweep_variable and primary_sweep_variable not in variations:
+            variations[primary_sweep_variable] = "All"
+        if secondary_sweep_variable and secondary_sweep_variable not in variations:
+            variations[secondary_sweep_variable] = "All"
+        report.variations = variations
+        report.sub_design_id = subdesign_id
+        report.point_number = polyline_points
+        if context == "Differential Pairs":
+            report.differential_pairs = True
+        elif self._app.design_type in ["Q3D Extractor", "2D Extractor"] and context:
+            report.matrix = context
+        elif (
+            self._app.design_type in ["Maxwell 2D", "Maxwell 3D"]
+            and context
+            and self._app.solution_type in ["EddyCurrent", "Electrostatic", "AC Magnetic"]
+        ):
+            if isinstance(context, dict):
+                for k, v in context.items():
+                    report.matrix = k
+                    report.reduced_matrix = v
+            elif (
+                hasattr(self._app.modeler, "line_names")
+                and hasattr(self._app.modeler, "point_names")
+                and context in self._app.modeler.point_names + self._app.modeler.line_names
+            ):
+                report.polyline = context
+            else:
+                report.matrix = context
+        elif report_category == "Far Fields":
+            if not context and self._app.field_setups:
+                report.far_field_sphere = self._app.field_setups[0].name
+                if "Theta" not in report.variations:
+                    report.variations["Theta"] = ["All"]
+                if "Phi" not in report.variations:
+                    report.variations["Phi"] = ["All"]
+                report.primary_sweep = "Theta"
+            else:
+                if isinstance(context, dict):
+                    if "Context" in context.keys() and "SourceContext" in context.keys():
+                        report.far_field_sphere = context["Context"]
+                        report.source_context = context["SourceContext"]
+                    if "Context" in context.keys() and "Source Group" in context.keys():
+                        report.far_field_sphere = context["Context"]
+                        report.source_group = context["Source Group"]
+                else:
+                    report.far_field_sphere = context
+        elif report_category == "Near Fields":
+            report.near_field = context
+        elif context and isinstance(context, dict):
+            for attribute in context:
+                if hasattr(report, attribute):
+                    report.__setattr__(attribute, context[attribute])
+                else:
+                    self.logger.warning(f"Parameter {attribute} is not available, check syntax.")
+        elif context:
+            if (
+                hasattr(self._app.modeler, "line_names")
+                and hasattr(self._app.modeler, "point_names")
+                and context in self._app.modeler.point_names + self._app.modeler.line_names
+            ):
+                report.polyline = context
+            elif context in [
+                "RL",
+                "Sources",
+                "Vias",
+                "Bondwires",
+                "Probes",
+            ]:
+                report.siwave_dc_category = [
+                    "RL",
+                    "Sources",
+                    "Vias",
+                    "Bondwires",
+                    "Probes",
+                ].index(context)
+        return report
+
     @pyaedt_function_handler(plotname="plot_name")
     def create_report(
         self,
@@ -1165,6 +1349,12 @@ class PostProcessorCommon(object):
             - For a far fields plot, specify the name of an infinite sphere.
             - For Maxwell 2D/3D Eddy Current solution types this can be provided as a dictionary
             where the key is the matrix name and value the reduced matrix.
+            - For Circuit Design, this can provide the plots' time range as a dictionary
+            where the keys are ``"time_start"`` and ``"time_stop"``.
+            By default ``"time_start"`` is 0ps and the ``"time_stop"`` is 10ns.
+            - For TDR analysis some dictionary options are "pulse_rise_time","step_time",
+            "time_windowing","maximum_time","use_pulse_in_tdr","differential_pairs". The default values
+            are as they appear manually in the UI.
         plot_name : str, optional
             Name of the plot. The default is ``None``.
         polyline_points : int, optional,
@@ -1177,7 +1367,6 @@ class PostProcessorCommon(object):
         -------
         :class:`ansys.aedt.core.modules.report_templates.Standard`
             ``True`` when successful, ``False`` when failed.
-
 
         References
         ----------
@@ -1192,23 +1381,27 @@ class PostProcessorCommon(object):
         >>> variations["Theta"] = ["All"]
         >>> variations["Phi"] = ["All"]
         >>> variations["Freq"] = ["30GHz"]
-        >>> hfss.post.create_report(expressions="db(GainTotal)",
-        ...                            setup_sweep_name=hfss.nominal_adaptive,
-        ...                            variations=variations,
-        ...                            primary_sweep_variable="Phi",
-        ...                            secondary_sweep_variable="Theta",
-        ...                            report_category="Far Fields",
-        ...                            plot_type="3D Polar Plot",
-        ...                            context="3D")
-        >>> hfss.post.create_report("S(1,1)",hfss.nominal_sweep,variations=variations,plot_type="Smith Chart")
+        >>> hfss.post.create_report(
+        ...     expressions="db(GainTotal)",
+        ...     setup_sweep_name=hfss.nominal_adaptive,
+        ...     variations=variations,
+        ...     primary_sweep_variable="Phi",
+        ...     secondary_sweep_variable="Theta",
+        ...     report_category="Far Fields",
+        ...     plot_type="3D Polar Plot",
+        ...     context="3D",
+        ... )
+        >>> hfss.post.create_report("S(1,1)", hfss.nominal_sweep, variations=variations, plot_type="Smith Chart")
         >>> hfss.release_desktop(False, False)
 
         >>> from ansys.aedt.core import Maxwell2d
         >>> m2d = Maxwell2d()
-        >>> m2d.post.create_report(expressions="InputCurrent(PHA)",
-        ...                               domain="Time",
-        ...                               primary_sweep_variable="Time",
-        ...                               plot_name="Winding Plot 1")
+        >>> m2d.post.create_report(
+        ...     expressions="InputCurrent(PHA)",
+        ...     domain="Time",
+        ...     primary_sweep_variable="Time",
+        ...     plot_name="Winding Plot 1",
+        ... )
         >>> m2d.release_desktop(False, False)
 
         >>> from ansys.aedt.core import Maxwell3d
@@ -1221,128 +1414,36 @@ class PostProcessorCommon(object):
         >>> m3d.assign_current(rectangle3.faces[0], amplitude=1, name="Cur3")
         >>> L = m3d.assign_matrix(assignment=["Cur1", "Cur2", "Cur3"], matrix_name="Matrix1")
         >>> out = L.join_series(sources=["Cur1", "Cur2"], matrix_name="ReducedMatrix1")
-        >>> expressions = m3d.post.available_report_quantities(report_category="EddyCurrent",
-        ...                                                    display_type="Data Table",
-        ...                                                    context={"Matrix1": "ReducedMatrix1"})
+        >>> expressions = m3d.post.available_report_quantities(
+        ...     report_category="EddyCurrent", display_type="Data Table", context={"Matrix1": "ReducedMatrix1"}
+        ... )
         >>> report = m3d.post.create_report(
-        ...    expressions=expressions,
-        ...    context={"Matrix1": "ReducedMatrix1"},
-        ...    plot_type="Data Table",
-        ...    plot_name="reduced_matrix")
+        ...     expressions=expressions,
+        ...     context={"Matrix1": "ReducedMatrix1"},
+        ...     plot_type="Data Table",
+        ...     plot_name="reduced_matrix",
+        ... )
         >>> m3d.release_desktop(False, False)
         """
-        if not setup_sweep_name:
-            if report_category == "Fields":
-                setup_sweep_name = self._app.nominal_adaptive  # Field report and no sweep name passed.
-            else:
-                setup_sweep_name = self._app.nominal_sweep
-        elif domain == "Sweep":
-            setup_sweep_name = self._get_setup_from_sweep_name(setup_sweep_name)
-        if not domain:
-            domain = "Sweep"
-            setup_name = setup_sweep_name.split(":")[0]
-            if setup_name:
-                for setup in self._app.setups:
-                    if setup.name == setup_name and "Time" in setup.default_intrinsics:
-                        domain = "Time"
-        if domain in ["Spectral", "Spectrum"]:
-            report_category = "Spectrum"
-        elif not report_category and not self._app.design_solutions.report_type:
-            self.logger.error("Solution not supported")
-            return False
-        elif not report_category:
-            report_category = self._app.design_solutions.report_type
-        if report_category in TEMPLATES_BY_NAME:
-            report_class = TEMPLATES_BY_NAME[report_category]
-        elif "Fields" in report_category:
-            report_class = TEMPLATES_BY_NAME["Fields"]
-        else:
-            report_class = TEMPLATES_BY_NAME["Standard"]
-
-        report = report_class(self, report_category, setup_sweep_name)
-        if not expressions:
-            expressions = [
-                i for i in self.available_report_quantities(report_category=report_category, context=context)
-            ]
-        report.expressions = expressions
-        report.domain = domain
-        if not variations and domain == "Sweep":
-            variations = self._app.available_variations.get_independent_nominal_values()
-            if variations:
-                variations["Freq"] = "All"
-            else:
-                variations = {"Freq": ["All"]}
-        elif not variations and domain != "Sweep":
-            variations = self._app.available_variations.get_independent_nominal_values()
-        report.variations = variations
-        if primary_sweep_variable:
-            report.primary_sweep = primary_sweep_variable
-        elif domain == "DCIR":  # pragma: no cover
-            report.primary_sweep = "Index"
-            if variations:
-                variations["Index"] = ["All"]
-            else:  # pragma: no cover
-                variations = {"Index": "All"}
-        if secondary_sweep_variable:
-            report.secondary_sweep = secondary_sweep_variable
-
-        report.variations = variations
+        report = self._get_report_object(
+            expressions=expressions,
+            setup_sweep_name=setup_sweep_name,
+            domain=domain,
+            variations=variations,
+            primary_sweep_variable=primary_sweep_variable,
+            secondary_sweep_variable=secondary_sweep_variable,
+            report_category=report_category,
+            context=context,
+            subdesign_id=subdesign_id,
+            polyline_points=polyline_points,
+        )
         report.report_type = plot_type
-        report.sub_design_id = subdesign_id
-        report.point_number = polyline_points
-        if context == "Differential Pairs":
-            report.differential_pairs = True
-        elif context in [
-            "RL",
-            "Sources",
-            "Vias",
-            "Bondwires",
-            "Probes",
-        ]:
-            report.siwave_dc_category = [
-                "RL",
-                "Sources",
-                "Vias",
-                "Bondwires",
-                "Probes",
-            ].index(context)
-        elif self._app.design_type in ["Q3D Extractor", "2D Extractor"] and context:
-            report.matrix = context
-        elif (
-            self._app.design_type in ["Maxwell 2D", "Maxwell 3D"]
-            and context
-            and self._app.solution_type in ["EddyCurrent", "Electrostatic"]
-        ):
-            if isinstance(context, dict):
-                for k, v in context.items():
-                    report.matrix = k
-                    report.reduced_matrix = v
-            elif context in self._app.modeler.line_names or context in self._app.modeler.point_names:
-                report.polyline = context
-            else:
-                report.matrix = context
-        elif report_category == "Far Fields":
-            if not context and self._app.field_setups:
-                report.far_field_sphere = self._app.field_setups[0].name
-            else:
-                if isinstance(context, dict):
-                    if "Context" in context.keys() and "SourceContext" in context.keys():
-                        report.far_field_sphere = context["Context"]
-                        report.source_context = context["SourceContext"]
-                    if "Context" in context.keys() and "Source Group" in context.keys():
-                        report.far_field_sphere = context["Context"]
-                        report.source_group = context["Source Group"]
-                else:
-                    report.far_field_sphere = context
-        elif report_category == "Near Fields":
-            report.near_field = context
-        elif context:
-            if context in self._app.modeler.line_names or context in self._app.modeler.point_names:
-                report.polyline = context
-
         result = report.create(plot_name)
         if result:
-            return report
+            if report.traces:
+                return report
+            else:
+                self.logger.error("Failed to create traces on the report. Check input parameters")
         return False
 
     @pyaedt_function_handler()
@@ -1455,7 +1556,9 @@ class PostProcessorCommon(object):
         >>> from ansys.aedt.core import Maxwell2d
         >>> m2d = Maxwell2d()
         >>> data3 = m2d.post.get_solution_data(
-        ...     "InputCurrent(PHA)", domain="Time", primary_sweep_variable="Time",
+        ...     "InputCurrent(PHA)",
+        ...     domain="Time",
+        ...     primary_sweep_variable="Time",
         ... )
         >>> data3.plot("InputCurrent(PHA)")
         >>> m2d.release_desktop(False, False)
@@ -1463,8 +1566,9 @@ class PostProcessorCommon(object):
         >>> from ansys.aedt.core import Circuit
         >>> circuit = Circuit()
         >>> context = {"algorithm": "FFT", "max_frequency": "100MHz", "time_stop": "2.5us", "time_start": "0ps"}
-        >>> spectralPlotData = circuit.post.get_solution_data(expressions="V(Vprobe1)", domain="Spectral",
-        ...                                                   primary_sweep_variable="Spectrum", context=context)
+        >>> spectralPlotData = circuit.post.get_solution_data(
+        ...     expressions="V(Vprobe1)", domain="Spectral", primary_sweep_variable="Spectrum", context=context
+        ... )
         >>> circuit.release_desktop(False, False)
 
         >>> from ansys.aedt.core import Maxwell3d
@@ -1477,125 +1581,28 @@ class PostProcessorCommon(object):
         >>> m3d.assign_current(rectangle3.faces[0], amplitude=1, name="Cur3")
         >>> L = m3d.assign_matrix(assignment=["Cur1", "Cur2", "Cur3"], matrix_name="Matrix1")
         >>> out = L.join_series(sources=["Cur1", "Cur2"], matrix_name="ReducedMatrix1")
-        >>> expressions = m3d.post.available_report_quantities(report_category="EddyCurrent",
-        ...                                                    display_type="Data Table",
-        ...                                                    context={"Matrix1": "ReducedMatrix1"})
+        >>> expressions = m3d.post.available_report_quantities(
+        ...     report_category="EddyCurrent", display_type="Data Table", context={"Matrix1": "ReducedMatrix1"}
+        ... )
         >>> data = m2d.post.get_solution_data(expressions=expressions, context={"Matrix1": "ReducedMatrix1"})
         >>> m3d.release_desktop(False, False)
         """
-        expressions = [expressions] if isinstance(expressions, str) else expressions
-        if not setup_sweep_name:
-            setup_sweep_name = self._app.nominal_sweep
-        if not domain:
-            domain = "Sweep"
-            setup_name = setup_sweep_name.split(":")[0]
-            if setup_name:
-                for setup in self._app.setups:
-                    if setup.name == setup_name and "Time" in setup.default_intrinsics:
-                        domain = "Time"
-        if domain in ["Spectral", "Spectrum"]:
-            report_category = "Spectrum"
-        if not report_category and not self._app.design_solutions.report_type:
-            self.logger.error("Solution not supported")
-            return False
-        elif not report_category:
-            report_category = self._app.design_solutions.report_type
-        if report_category in TEMPLATES_BY_NAME:
-            report_class = TEMPLATES_BY_NAME[report_category]
-        elif "Fields" in report_category:
-            report_class = TEMPLATES_BY_NAME["Fields"]
-        else:
-            report_class = TEMPLATES_BY_NAME["Standard"]
-
-        report = report_class(self, report_category, setup_sweep_name)
-        if not expressions:
-            expressions = [
-                i for i in self.available_report_quantities(report_category=report_category, context=context)
-            ]
+        report = self._get_report_object(
+            expressions=expressions,
+            setup_sweep_name=setup_sweep_name,
+            domain=domain,
+            variations=variations,
+            primary_sweep_variable=primary_sweep_variable,
+            secondary_sweep_variable=None,
+            report_category=report_category,
+            context=context,
+            subdesign_id=subdesign_id,
+            polyline_points=polyline_points,
+        )
         if math_formula:
-            expressions = [f"{math_formula}({i})" for i in expressions]
-        report.expressions = expressions
-        report.domain = domain
-        if primary_sweep_variable:
-            report.primary_sweep = primary_sweep_variable
-        if not variations and domain == "Sweep":
-            variations = self._app.available_variations.get_independent_nominal_values()
-            if variations:
-                variations["Freq"] = "All"
-            else:
-                variations = {"Freq": ["All"]}
-        elif not variations and domain != "Sweep":
-            variations = self._app.available_variations.get_independent_nominal_values()
-        report.variations = variations
-        report.sub_design_id = subdesign_id
-        report.point_number = polyline_points
-        if context == "Differential Pairs":
-            report.differential_pairs = True
-        elif self._app.design_type in ["Q3D Extractor", "2D Extractor"] and context:
-            report.matrix = context
-        elif (
-            self._app.design_type in ["Maxwell 2D", "Maxwell 3D"]
-            and context
-            and self._app.solution_type in ["EddyCurrent", "Electrostatic"]
-        ):
-            if isinstance(context, dict):
-                for k, v in context.items():
-                    report.matrix = k
-                    report.reduced_matrix = v
-            elif (
-                hasattr(self._app.modeler, "line_names")
-                and hasattr(self._app.modeler, "point_names")
-                and context in self._app.modeler.point_names + self._app.modeler.line_names
-            ):
-                report.polyline = context
-            else:
-                report.matrix = context
-        elif report_category == "Far Fields":
-            if not context and self._app.field_setups:
-                report.far_field_sphere = self._app.field_setups[0].name
-                if "Theta" not in report.variations:
-                    report.variations["Theta"] = ["All"]
-                if "Phi" not in report.variations:
-                    report.variations["Phi"] = ["All"]
-                report.primary_sweep = "Theta"
-            else:
-                if isinstance(context, dict):
-                    if "Context" in context.keys() and "SourceContext" in context.keys():
-                        report.far_field_sphere = context["Context"]
-                        report.source_context = context["SourceContext"]
-                else:
-                    report.far_field_sphere = context
-        elif report_category == "Near Fields":
-            report.near_field = context
-        elif context and isinstance(context, dict):
-            for attribute in context:
-                if hasattr(report, attribute):
-                    report.__setattr__(attribute, context[attribute])
-                else:
-                    self.logger.warning(f"Parameter {attribute} is not available, check syntax.")
-        elif context:
-            if (
-                hasattr(self._app.modeler, "line_names")
-                and hasattr(self._app.modeler, "point_names")
-                and context in self._app.modeler.point_names + self._app.modeler.line_names
-            ):
-                report.polyline = context
-            elif context in [
-                "RL",
-                "Sources",
-                "Vias",
-                "Bondwires",
-                "Probes",
-            ]:
-                report.siwave_dc_category = [
-                    "RL",
-                    "Sources",
-                    "Vias",
-                    "Bondwires",
-                    "Probes",
-                ].index(context)
-        solution_data = report.get_solution_data()
-        return solution_data
+            expressions = [f"{math_formula}({i})" for i in report.expressions]
+            report.expressions = expressions
+        return report.get_solution_data()
 
     @pyaedt_function_handler(input_dict="report_settings")
     def create_report_from_configuration(
@@ -1612,7 +1619,7 @@ class PostProcessorCommon(object):
         solution_name : str, optional
             Setup name to use.
         matplotlib : bool, optional
-            Whether if use AEDT or ReportPlotter to generate the plot. Eye diagrams are not supported.
+            Whether to use AEDT or ReportPlotter to generate the plot. Eye diagrams are not supported.
 
         Returns
         -------
@@ -1624,17 +1631,18 @@ class PostProcessorCommon(object):
         Create report from JSON file.
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> hfss.post.create_report_from_configuration(r'C:\\temp\\my_report.json',
-        ...                                            solution_name="Setup1 : LastAdpative")
+        >>> hfss.post.create_report_from_configuration(
+        ...     r"C:\\temp\\my_report.json", solution_name="Setup1 : LastAdpative"
+        ... )
 
         Create report from RPT file.
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> hfss.post.create_report_from_configuration(r'C:\\temp\\my_report.rpt')
+        >>> hfss.post.create_report_from_configuration(r"C:\\temp\\my_report.rpt")
 
         Create report from dictionary.
         >>> from ansys.aedt.core import Hfss
-        >>> from ansys.aedt.core.generic.general_methods import read_json
+        >>> from ansys.aedt.core.generic.file_utils import read_json
         >>> hfss = Hfss()
         >>> dict_vals = read_json("Report_Simple.json")
         >>> hfss.post.create_report_from_configuration(report_settings=dict_vals)
@@ -1735,6 +1743,8 @@ class PostProcessorCommon(object):
 
     @pyaedt_function_handler()
     def _report_plotter(self, report):
+        from ansys.aedt.core.visualization.plot.matplotlib import ReportPlotter
+
         sols = report.get_solution_data()
         report_plotter = ReportPlotter()
         report_plotter.title = report._legacy_props.get("plot_name", "PyAEDT Report")
@@ -1745,7 +1755,6 @@ class PostProcessorCommon(object):
         except KeyError:
             pass
         try:
-
             report_plotter.general_plot_color = [
                 i / 255 for i in report._legacy_props["general"]["appearance"]["plot_color"]
             ]
@@ -1851,12 +1860,12 @@ class PostProcessorCommon(object):
         if isinstance(sweeps, list):
             return sweeps
         sweep_list = []
-        for el in sweeps:
+        for el, val in sweeps.items():
             sweep_list.append(el + ":=")
-            if isinstance(sweeps[el], list):
-                sweep_list.append(sweeps[el])
+            if isinstance(val, list):
+                sweep_list.append([str(i) if isinstance(i, Quantity) else i for i in val])
             else:
-                sweep_list.append([sweeps[el]])
+                sweep_list.append([str(val) if isinstance(val, Quantity) else val])
         return sweep_list
 
     @staticmethod
@@ -1865,7 +1874,7 @@ class PostProcessorCommon(object):
         for k, v in report_settings.items():
             if k in props:
                 if isinstance(v, dict):
-                    props[k] = apply_settings(props[k], v)
+                    props[k] = super().__apply_settings(props[k], v)
                 else:
                     props[k] = v
             else:
@@ -1917,13 +1926,12 @@ class Reports(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Circuit
         >>> cir = Circuit(my_project)
-        >>> report = cir.post.reports_by_category.standard("dB(S(1,1))","LNA")
+        >>> report = cir.post.reports_by_category.standard("dB(S(1,1))", "LNA")
         >>> report.create()
         >>> solutions = report.get_solution_data()
-        >>> report2 = cir.post.reports_by_category.standard(["dB(S(2,1))", "dB(S(2,2))"],"LNA")
+        >>> report2 = cir.post.reports_by_category.standard(["dB(S(2,1))", "dB(S(2,2))"], "LNA")
 
         """
         if not setup:
@@ -1960,10 +1968,9 @@ class Reports(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Icepak
         >>> ipk = Icepak(my_project)
-        >>> report = ipk.post.reports_by_category.monitor(["monitor_surf.Temperature","monitor_point.Temperature"])
+        >>> report = ipk.post.reports_by_category.monitor(["monitor_surf.Temperature", "monitor_point.Temperature"])
         >>> report = report.create()
         """
         if not setup:
@@ -1999,7 +2006,6 @@ class Reports(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss(my_project)
         >>> report = hfss.post.reports_by_category.fields("Mag_E", "Setup : LastAdaptive", "Polyline1")
@@ -2181,7 +2187,7 @@ class Reports(object):
             rep.source_context = source_context
             rep.report_type = "Radiation Pattern"
             if expressions:
-                if type(expressions) == list:
+                if isinstance(expressions, list):
                     rep.expressions = expressions
                 else:
                     rep.expressions = [expressions]
@@ -2400,7 +2406,7 @@ class Reports(object):
         Examples
         --------
         >>> from ansys.aedt.core import Circuit
-        >>> cir= Circuit()
+        >>> cir = Circuit()
         >>> new_eye = cir.post.reports_by_category.statistical_eye_contour("V(Vout)")
         >>> new_eye.unit_interval = "1e-9s"
         >>> new_eye.time_stop = "100ns"
@@ -2457,7 +2463,7 @@ class Reports(object):
         Examples
         --------
         >>> from ansys.aedt.core import Circuit
-        >>> cir= Circuit()
+        >>> cir = Circuit()
         >>> new_eye = cir.post.reports_by_category.eye_diagram("V(Vout)")
         >>> new_eye.unit_interval = "1e-9s"
         >>> new_eye.time_stop = "100ns"
@@ -2467,7 +2473,6 @@ class Reports(object):
             setup = self._post_app._app.nominal_sweep
         if "Eye Diagram" in self._templates:
             if "AMIAnalysis" in self._post_app._app.get_setup(setup).props:
-
                 report_cat = "Eye Diagram"
                 if statistical_analysis:
                     report_cat = "Statistical Eye"
@@ -2508,7 +2513,7 @@ class Reports(object):
         Examples
         --------
         >>> from ansys.aedt.core import Circuit
-        >>> cir= Circuit()
+        >>> cir = Circuit()
         >>> new_eye = cir.post.reports_by_category.spectral("V(Vout)")
         >>> new_eye.create()
 
@@ -2517,8 +2522,9 @@ class Reports(object):
             setup = self._post_app._app.nominal_sweep
         rep = None
         if "Spectrum" in self._templates:
-            rep = ansys.aedt.core.visualization.report.standard.Spectral(self._post_app, "Spectrum", setup)
-            rep.expressions = self._retrieve_default_expressions(expressions, rep, setup)
+            rep = self._post_app._get_report_object(expressions=expressions, setup_sweep_name=setup, domain="Spectrum")
+            # rep = ansys.aedt.core.visualization.report.standard.Spectral(self._post_app, "Spectrum", setup)
+            # rep.expressions = self._retrieve_default_expressions(expressions, rep, setup)
         return rep
 
     @pyaedt_function_handler()
@@ -2543,7 +2549,7 @@ class Reports(object):
         Examples
         --------
         >>> from ansys.aedt.core import Circuit
-        >>> cir= Circuit()
+        >>> cir = Circuit()
         >>> new_eye = cir.post.emi_receiver()
         >>> new_eye.create()
         """
@@ -2551,7 +2557,7 @@ class Reports(object):
             setup_name = self._post_app._app.nominal_sweep
         rep = None
         if "EMIReceiver" in self._templates and self._post_app._app.desktop_class.aedt_version_id > "2023.2":
-            rep = ansys.aedt.core.visualization.report.emi.EMIReceiver(self._post_app, setup_name)
+            rep = ansys.aedt.core.visualization.report.emi.EMIReceiver(self._post_app, "EMIReceiver", setup_name)
             if not expressions:
                 expressions = f"Average[{rep.net}]"
             else:

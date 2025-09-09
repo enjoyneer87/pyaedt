@@ -29,14 +29,10 @@ import time
 from ansys.aedt.core.circuit import Circuit
 from ansys.aedt.core.circuit_netlist import CircuitNetlist
 from ansys.aedt.core.desktop import Desktop
-
-Emit = None
-if not ("IronPython" in sys.version or ".NETFramework" in sys.version):  # pragma: no cover
-    from ansys.aedt.core.emit import Emit
 from ansys.aedt.core.generic.general_methods import is_linux
 from ansys.aedt.core.generic.settings import settings
-from ansys.aedt.core.hfss3dlayout import Hfss3dLayout
 from ansys.aedt.core.hfss import Hfss
+from ansys.aedt.core.hfss3dlayout import Hfss3dLayout
 from ansys.aedt.core.icepak import Icepak
 from ansys.aedt.core.maxwell import Maxwell2d
 from ansys.aedt.core.maxwell import Maxwell3d
@@ -47,39 +43,11 @@ from ansys.aedt.core.q3d import Q3d
 from ansys.aedt.core.rmxprt import Rmxprt
 from ansys.aedt.core.twinbuilder import TwinBuilder
 
+Emit = None
+if not ("IronPython" in sys.version or ".NETFramework" in sys.version):  # pragma: no cover
+    from ansys.aedt.core.emit import Emit
+
 Simplorer = TwinBuilder
-
-
-def FilterSolutions(
-    version=None,
-):
-    """Initialize a ``FilterSolutions` instance.
-
-    Parameters
-    ----------
-    version : str optional
-        Version of AEDT to use in ``xxxx.x`` format to use. The default is ``None``, in which case the
-        active setup or latest installed version is used.
-
-    Returns
-    -------
-    :class:`ansys.aedt.core.filtersolutions.FilterSolutions`
-
-    Examples
-    --------
-    Define a band-pass Butterworth filter with a center frequency of 1 GHz and a pass band width of 500 MHz.
-
-    design = ansys.aedt.core.LumpedDesign(version="2025.1")
-    design.attributes.filter_class = FilterClass.BAND_PASS
-    design.attributes.filter_type = FilterType.BUTTERWORTH
-    design.attributes.pass_band_center_frequency = "1G"
-    design.attributes.pass_band_width_frequency = "500M"
-    """
-    from ansys.aedt.core.filtersolutions import FilterSolutions as app
-
-    return app(
-        version=version,
-    )
 
 
 def launch_desktop(
@@ -135,7 +103,7 @@ def launch_desktop(
     Launch AEDT 2025 R1 in non-graphical mode and initialize HFSS.
 
     >>> import ansys.aedt.core
-    >>> desktop = ansys.aedt.core.launch_desktop("2025.1", non_graphical=True)
+    >>> desktop = ansys.aedt.core.launch_desktop("2025.2", non_graphical=True)
     PyAEDT INFO: pyaedt v...
     PyAEDT INFO: Python version ...
     >>> hfss = ansys.aedt.core.Hfss(design="HFSSDesign1")
@@ -144,7 +112,7 @@ def launch_desktop(
 
     Launch AEDT 2025 R1 in graphical mode and initialize HFSS.
 
-    >>> desktop = Desktop("2025.1")
+    >>> desktop = Desktop("2025.2")
     PyAEDT INFO: pyaedt v...
     PyAEDT INFO: Python version ...
     >>> hfss = ansys.aedt.core.Hfss(design="HFSSDesign1")
@@ -196,9 +164,9 @@ def get_pyaedt_app(project_name=None, design_name=None, desktop=None):
     Returns
     -------
     :def :`ansys.aedt.core.Hfss`
-        Any of the Pyaedt App initialized.
+        Any of the PyAEDT App initialized.
     """
-    from ansys.aedt.core.generic.desktop_sessions import _desktop_sessions
+    from ansys.aedt.core.internal.desktop_sessions import _desktop_sessions
 
     odesktop = None
     process_id = None
@@ -219,7 +187,7 @@ def get_pyaedt_app(project_name=None, design_name=None, desktop=None):
     if not process_id:
         process_id = odesktop.GetProcessID()
     if project_name and project_name not in odesktop.GetProjectList():
-        raise AttributeError(f"Project  {project_name} doesn't exist in current desktop.")
+        raise AttributeError(f"Project {project_name} doesn't exist in current desktop.")
     if not project_name:
         oProject = odesktop.GetActiveProject()
     else:

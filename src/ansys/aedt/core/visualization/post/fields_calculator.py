@@ -3,6 +3,7 @@
 # Copyright (C) 2021 - 2025 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
 #
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -25,14 +26,15 @@ import copy
 import os
 import warnings
 
-import ansys.aedt.core
-from ansys.aedt.core.generic.general_methods import generate_unique_name
-from ansys.aedt.core.generic.general_methods import generate_unique_project_name
-from ansys.aedt.core.generic.general_methods import open_file
-from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.general_methods import read_configuration_file
 from jsonschema import exceptions
 from jsonschema import validate
+
+import ansys.aedt.core
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import generate_unique_project_name
+from ansys.aedt.core.generic.file_utils import open_file
+from ansys.aedt.core.generic.file_utils import read_configuration_file
+from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 
 
 class FieldsCalculator:
@@ -54,24 +56,26 @@ class FieldsCalculator:
     >>> hfss = Hfss()
     >>> poly = hfss.modeler.create_polyline([[0, 0, 0], [1, 0, 1]], name="Polyline1")
     >>> my_expression = {
-    ...                     "name": "test",
-    ...                     "description": "Voltage drop along a line",
-    ...                     "design_type": ["HFSS", "Q3D Extractor"],
-    ...                     "fields_type": ["Fields", "CG Fields"],
-    ...                     "solution_type": "",
-    ...                     "primary_sweep": "Freq",
-    ...                     "assignment": "",
-    ...                     "assignment_type": ["Line"],
-    ...                     "operations": ["Fundamental_Quantity('E')",
-    ...                     "Operation('Real')",
-    ...                     "Operation('Tangent')",
-    ...                     "Operation('Dot')",
-    ...                     "EnterLine('assignment')",
-    ...                     "Operation('LineValue')",
-    ...                     "Operation('Integrate')",
-    ...                     "Operation('CmplxR')"],
-    ...                     "report": ["Data Table", "Rectangular Plot"],
-    ...                 }
+    ...     "name": "test",
+    ...     "description": "Voltage drop along a line",
+    ...     "design_type": ["HFSS", "Q3D Extractor"],
+    ...     "fields_type": ["Fields", "CG Fields"],
+    ...     "solution_type": "",
+    ...     "primary_sweep": "Freq",
+    ...     "assignment": "",
+    ...     "assignment_type": ["Line"],
+    ...     "operations": [
+    ...         "Fundamental_Quantity('E')",
+    ...         "Operation('Real')",
+    ...         "Operation('Tangent')",
+    ...         "Operation('Dot')",
+    ...         "EnterLine('assignment')",
+    ...         "Operation('LineValue')",
+    ...         "Operation('Integrate')",
+    ...         "Operation('CmplxR')",
+    ...     ],
+    ...     "report": ["Data Table", "Rectangular Plot"],
+    ... }
     >>> expr_name = hfss.post.fields_calculator.add_expression(my_expression, "Polyline1")
     >>> hfss.release_desktop(False, False)
 
@@ -147,24 +151,26 @@ class FieldsCalculator:
         >>> hfss = Hfss()
         >>> poly = hfss.modeler.create_polyline([[0, 0, 0], [1, 0, 1]], name="Polyline1")
         >>> my_expression = {
-        ...        "name": "test",
-        ...        "description": "Voltage drop along a line",
-        ...        "design_type": ["HFSS", "Q3D Extractor"],
-        ...        "fields_type": ["Fields", "CG Fields"],
-        ...        "solution_type": "",
-        ...        "primary_sweep": "Freq",
-        ...        "assignment": "",
-        ...        "assignment_type": ["Line"],
-        ...        "operations": ["Fundamental_Quantity('E')",
-        ...                        "Operation('Real')",
-        ...                        "Operation('Tangent')",
-        ...                        "Operation('Dot')",
-        ...                        "EnterLine('assignment')",
-        ...                        "Operation('LineValue')",
-        ...                        "Operation('Integrate')",
-        ...                        "Operation('CmplxR')"],
-        ...        "report": ["Data Table", "Rectangular Plot"],
-        ...    }
+        ...     "name": "test",
+        ...     "description": "Voltage drop along a line",
+        ...     "design_type": ["HFSS", "Q3D Extractor"],
+        ...     "fields_type": ["Fields", "CG Fields"],
+        ...     "solution_type": "",
+        ...     "primary_sweep": "Freq",
+        ...     "assignment": "",
+        ...     "assignment_type": ["Line"],
+        ...     "operations": [
+        ...         "Fundamental_Quantity('E')",
+        ...         "Operation('Real')",
+        ...         "Operation('Tangent')",
+        ...         "Operation('Dot')",
+        ...         "EnterLine('assignment')",
+        ...         "Operation('LineValue')",
+        ...         "Operation('Integrate')",
+        ...         "Operation('CmplxR')",
+        ...     ],
+        ...     "report": ["Data Table", "Rectangular Plot"],
+        ... }
         >>> expr_name = hfss.post.fields_calculator.add_expression(my_expression, "Polyline1")
         >>> hfss.release_desktop(False, False)
         """
@@ -611,7 +617,7 @@ class FieldsCalculator:
         if not setup:
             setup = self.__app.nominal_adaptive
         setup_name = setup.split(":")[0].strip(" ")
-        if setup_name not in self.__app.existing_analysis_setups:
+        if setup_name not in self.__app.setup_names:
             self.__app.logger.error("Invalid setup name.")
             return False
         self.ofieldsreporter.CalcStack("clear")
@@ -620,9 +626,10 @@ class FieldsCalculator:
         for k, v in self.__app.variable_manager.design_variables.items():
             args.append(f"{k}:=")
             args.append(v.expression)
-        if intrinsics is None:
-            intrinsics = self.__app.get_setup(setup_name).default_intrinsics
+        intrinsics = self.__app.post._check_intrinsics(intrinsics)
         for k, v in intrinsics.items():
+            if k == "Time" and self.__app.solution_type == "SteadyState":
+                continue
             args.append(f"{k}:=")
             args.append(v)
         self.ofieldsreporter.CalculatorWrite(output_file, ["Solution:=", setup], args)

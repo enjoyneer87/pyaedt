@@ -184,10 +184,11 @@ class ExportToAedt:
         self._dll_interface = ansys.aedt.core.filtersolutions_core._dll_interface()
         self._define_export_to_desktop_dll_functions()
         self._substrate_er = SubstrateEr.AIR.value  # Default to AIR's Er value
+        if self._dll_interface.api_version() >= "2025.2":
+            self.define_export_to_desktop_distributed_dll_functions()
 
     def _define_export_to_desktop_dll_functions(self):
         """Define C++ API DLL functions."""
-
         self._dll.setSchematicName.argtype = c_char_p
         self._dll.setSchematicName.restype = c_int
         self._dll.getSchematicName.argtypes = [c_char_p, c_int]
@@ -272,6 +273,9 @@ class ExportToAedt:
         self._dll.setOptimizeAfterExport.restype = c_int
         self._dll.getOptimizeAfterExport.argtype = POINTER(c_bool)
         self._dll.getOptimizeAfterExport.restype = c_int
+
+        self._dll.exportDesign.argtypes = [c_int, c_int, c_char_p, POINTER(c_int)]
+        self._dll.exportDesign.restype = c_int
 
         self._dll.loadLibraryPartsConf.argtype = c_char_p
         self._dll.loadLibraryPartsConf.restype = c_int
@@ -364,10 +368,16 @@ class ExportToAedt:
         self._dll.getInterconnectGeometryOptimization.argtype = POINTER(c_bool)
         self._dll.getInterconnectGeometryOptimization.restype = c_int
 
-        self._dll.setSubstrateType.argtype = c_char_p
-        self._dll.setSubstrateType.restype = int
-        self._dll.getSubstrateType.argtypes = [c_char_p, c_int]
-        self._dll.getSubstrateType.restype = int
+        if self._dll_interface.api_version() >= "2025.2":
+            self._dll.setSubstrateType.argtype = c_int
+            self._dll.setSubstrateType.restype = c_int
+            self._dll.getSubstrateType.argtype = POINTER(c_int)
+            self._dll.getSubstrateType.restype = c_int
+        else:
+            self._dll.setSubstrateType.argtype = c_char_p
+            self._dll.setSubstrateType.restype = c_int
+            self._dll.getSubstrateType.argtypes = [c_char_p, c_int]
+            self._dll.getSubstrateType.restype = c_int
 
         self._dll.setEr.argtype = [c_char_p, c_int]
         self._dll.setEr.restype = c_int
@@ -492,6 +502,8 @@ class ExportToAedt:
         self._dll.removeModelithicsResistorsFamily.argtype = c_char_p
         self._dll.removeModelithicsResistorsFamily.restype = c_int
 
+    def define_export_to_desktop_distributed_dll_functions(self):
+        """Define C++ API DLL functions for distributed filter."""
         self._dll.setCircuitDesign.argtype = c_bool
         self._dll.setCircuitDesign.restype = c_int
         self._dll.getCircuitDesign.argtype = POINTER(c_bool)
@@ -846,10 +858,17 @@ class ExportToAedt:
         self._dll_interface.raise_error(status)
 
     def export_design(self, export_format=None, export_creation_mode=None, export_path=None):
-        """Export the design directly to ``AEDT` or generate a ``Python`` script for exporting.
+        """Export the design directly to ``AEDT`` or generate a ``Python`` script for exporting.
 
         When exporting to ``AEDT``, the design can either be appended to an existing project or overwrite it.
         When generating a Python script, the script is created and saved to the specified file location.
+
+        Returns the design object for an exported design when ``export_format``
+        is set to ``ExportFormat.DIRECT_TO_AEDT``.
+
+        The returned object type is one of ``Circuit``, ``Hfss``, or ``Hfss3dLayout``.
+
+        Returns ``None`` if ``export_format`` is set to ``ExportFormat.PYTHON_SCRIPT``.
 
         Parameters
         ----------
@@ -862,21 +881,35 @@ class ExportToAedt:
         export_path : str
             The export path for Python script.
             The default is ``None``.
+
+        Returns
+        -------
+        :class: ``AEDT`` design object
         """
+        desktop_version = getattr(self._dll_interface, "_version")
         if export_format is None:
             export_format = ExportFormat.DIRECT_TO_AEDT
         if export_creation_mode is None:
             export_creation_mode = ExportCreationMode.OVERWRITE
-        if export_path is None:
-            export_path = ""
+        if not export_path:
+            export_path_bytes = b""
         else:
             directory_path = os.path.dirname(export_path)
             # Check if the directory path exists, if not, create it to ensure the export path is valid
             if not os.path.exists(directory_path):
                 os.makedirs(directory_path)
-        export_path_bytes = bytes(export_path, "ascii")
-        status = self._dll.exportDesign(export_format.value, export_creation_mode.value, export_path_bytes)
+            export_path_bytes = bytes(export_path, "ascii")
+        desktop_process_id = c_int()
+
+        status = self._dll.exportDesign(
+            export_format.value, export_creation_mode.value, export_path_bytes, byref(desktop_process_id)
+        )
         self._dll_interface.raise_error(status)
+        if export_format == ExportFormat.DIRECT_TO_AEDT:
+            design = ansys.aedt.core.filtersolutions.FilterDesignBase._create_design(
+                self, desktop_version, desktop_process_id.value
+            )
+            return design
 
     def load_library_parts_config(self, load_library_parts_config_string):
         self._dll_interface.set_string(self._dll.loadLibraryPartsConf, load_library_parts_config_string)
@@ -894,7 +927,7 @@ class ExportToAedt:
 
     @property
     def part_libraries(self) -> PartLibraries:
-        """Part libraries selection. The default is ``LUMPED``.
+        """Part libraries selection. The default is ``LUMPED`` if not specified.
 
         The ``PartLibraries`` enum provides a list of all options.
 
@@ -1272,7 +1305,7 @@ class ExportToAedt:
 
     @property
     def substrate_type(self) -> SubstrateType:
-        """Subctrate type of the filter.
+        """Substrate type of the filter. The default is ``MICROSTRIP`` if not specified.
 
         The ``SubstrateType`` enum provides a list of all substrate types.
 
@@ -1280,14 +1313,29 @@ class ExportToAedt:
         -------
         :enum:`SubstrateType`
         """
-        type_string = self._dll_interface.get_string(self._dll.getSubstrateType)
-        return self._dll_interface.string_to_enum(SubstrateType, type_string)
+        # The 25R2 DLL is updated to return the enum value directly
+        if self._dll_interface.api_version() >= "2025.2":
+            index = c_int()
+            substrate_type_list = list(SubstrateType)
+            status = self._dll.getSubstrateType(byref(index))
+            self._dll_interface.raise_error(status)
+            substrate_type = substrate_type_list[index.value]
+            return substrate_type
+        # The 25R1 DLL returns the substrate type as a string
+        else:
+            type_string = self._dll_interface.get_string(self._dll.getSubstrateType)
+            return self._dll_interface.string_to_enum(SubstrateType, type_string)
 
     @substrate_type.setter
     def substrate_type(self, substrate_type: SubstrateType):
-        if substrate_type:
+        if self._dll_interface.api_version() >= "2025.2":
+            # The 25R2 DLL is updated to accept the enum value directly
+            status = self._dll.setSubstrateType(substrate_type.value)
+        else:
+            # The 25R1 DLL accepts substrate type as a string
             string_value = self._dll_interface.enum_to_string(substrate_type)
-            self._dll_interface.set_string(self._dll.setSubstrateType, string_value)
+            status = self._dll_interface.set_string(self._dll.setSubstrateType, string_value)
+        self._dll_interface.raise_error(status)
 
     @property
     def substrate_er(self) -> Union[SubstrateType, str]:
@@ -1319,7 +1367,7 @@ class ExportToAedt:
             substrate_er_value = substrate_input
             substrate_er_index = -1
         else:
-            raise ValueError("Invalid substrate input. Must be a SubstrateEr enum member or a string.")
+            raise ValueError("Invalid substrate input. Must be a SubstrateEr enum member or a string")
         substrate_er_value_bytes = bytes(substrate_er_value, "ascii")
         status = self._dll.setEr(substrate_er_value_bytes, substrate_er_index)
         self._dll_interface.raise_error(status)
@@ -1353,7 +1401,7 @@ class ExportToAedt:
             substrate_resistivity_value = substrate_input
             substrate_resistivity_index = -1
         else:
-            raise ValueError("Invalid substrate input. Must be a SubstrateResistivity enum member or a string.")
+            raise ValueError("Invalid substrate input. Must be a SubstrateResistivity enum member or a string")
         substrate_resistivity_value_bytes = bytes(substrate_resistivity_value, "ascii")
         status = self._dll.setResistivity(substrate_resistivity_value_bytes, substrate_resistivity_index)
         self._dll_interface.raise_error(status)
@@ -1387,7 +1435,7 @@ class ExportToAedt:
             substrate_loss_tangent_value = substrate_input
             substrate_loss_tangent_index = -1
         else:
-            raise ValueError("Invalid substrate input. Must be a SubstrateEr enum member or a string.")
+            raise ValueError("Invalid substrate input. Must be a SubstrateEr enum member or a string")
         substrate_loss_tangent_value_bytes = bytes(substrate_loss_tangent_value, "ascii")
         status = self._dll.setLossTangent(substrate_loss_tangent_value_bytes, substrate_loss_tangent_index)
         self._dll_interface.raise_error(status)
@@ -1525,7 +1573,7 @@ class ExportToAedt:
 
     @property
     def modelithics_include_interconnect_enabled(self) -> bool:
-        """Flag indicating if the inclusion of interconnects is enabled for``Modelithics`` export.
+        """Flag indicating if the inclusion of interconnects is enabled for ``Modelithics`` export.
 
         Returns
         -------
@@ -1555,9 +1603,9 @@ class ExportToAedt:
         return int(count.value)
 
     def modelithics_inductor_list(self, row_index) -> str:
-        """Get the name of the ``Modelithics` inductor family model from the loaded list based
-        on the specified index."""
-
+        """Get the name of the ``Modelithics`` inductor family model from the loaded list based
+        on the specified index.
+        """
         modelithics_inductor_buffer = create_string_buffer(100)
         status = self._dll.getModelithicsInductorsList(row_index, modelithics_inductor_buffer, 100)
         self._dll_interface.raise_error(status)
@@ -1648,8 +1696,8 @@ class ExportToAedt:
 
     def modelithics_capacitor_list(self, row_index) -> str:
         """Get the name of the ``Modelithics`` capacitor family model from the loaded list based on
-        the specified index."""
-
+        the specified index.
+        """
         modelithics_capacitor_buffer = create_string_buffer(100)
         status = self._dll.getModelithicsCapacitorsList(row_index, modelithics_capacitor_buffer, 100)
         self._dll_interface.raise_error(status)
@@ -1706,7 +1754,7 @@ class ExportToAedt:
         return modelithics_capacitor_family
 
     def modelithics_capacitor_add_family(self, modelithics_capacitor) -> str:
-        """Add a specified``Modelithics`` capacitor family to the capacitor family list.
+        """Add a specified ``Modelithics`` capacitor family to the capacitor family list.
 
         Parameters
         ----------
@@ -1740,8 +1788,8 @@ class ExportToAedt:
 
     def modelithics_resistor_list(self, row_index) -> str:
         """Get the name of the ``Modelithics`` resistor family model from the loaded list based on the
-        specified index."""
-
+        specified index.
+        """
         modelithics_resistor_buffer = create_string_buffer(100)
         status = self._dll.getModelithicsResistorsList(row_index, modelithics_resistor_buffer, 100)
         self._dll_interface.raise_error(status)

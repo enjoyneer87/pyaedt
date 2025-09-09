@@ -22,11 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os
-
 from ansys.aedt.core import constants
-from ansys.aedt.core import pyaedt_path
-from ansys.aedt.core.generic.general_methods import generate_unique_name
+from ansys.aedt.core.generic.file_utils import generate_unique_name
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.modules.material_lib import Material
 
@@ -48,7 +45,6 @@ def _replace_by_underscore(character, string):
 
     Examples
     --------
-
     >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import _replace_by_underscore
     >>> name = "Duroid (tm)"
     >>> name = _replace_by_underscore(" ", name)
@@ -81,7 +77,6 @@ class NamedVariable(object):
 
     Examples
     --------
-
     >>> from ansys.aedt.core import Hfss
     >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import NamedVariable
     >>> hfss = Hfss()
@@ -120,7 +115,8 @@ class NamedVariable(object):
         Parameters
         ----------
         expression: str
-            Value expression of the variable."""
+            Value expression of the variable.
+        """
         if isinstance(expression, str):
             self._expression = expression
             self._application[self.name] = expression
@@ -205,7 +201,6 @@ class DuplicatedParametrizedMaterial(object):
 
     Examples
     --------
-
     >>> from ansys.aedt.core import Hfss
     >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import DuplicatedParametrizedMaterial
     >>> hfss = Hfss()
@@ -389,7 +384,7 @@ class Layer3D(object):
 
             else:
                 obj_3d = self._app.modeler.create_rectangle(
-                    constants.PLANE.XY,
+                    constants.Plane.XY,
                     ["dielectric_x_position", "dielectric_y_position", layer_position],
                     ["dielectric_length", "dielectric_width"],
                     name=self._name,
@@ -405,7 +400,7 @@ class Layer3D(object):
                 )
             else:
                 obj_3d = self._app.modeler.create_rectangle(
-                    constants.PLANE.XY,
+                    constants.Plane.XY,
                     ["dielectric_x_position", "dielectric_y_position", layer_position],
                     ["dielectric_length", "dielectric_width"],
                     name=self._name,
@@ -692,78 +687,6 @@ class Layer3D(object):
         return created_patch
 
     @pyaedt_function_handler()
-    def ml_patch(
-        self,
-        frequency,
-        patch_width,
-        patch_position_x=0,
-        patch_position_y=0,
-        patch_name=None,
-        axis="X",
-    ):
-        """Create a new parametric patch using machine learning algorithm rather than analytic formulas.
-
-        Parameters
-        ----------
-        frequency : float, None
-            Frequency value for patch calculation in Hz.
-        patch_width : float
-            Patch width.
-        patch_position_x : float, optional
-            Patch start x position.
-        patch_position_y : float, optional
-            Patch start y position.
-        patch_name : str, optional
-            Patch name.
-        axis : str, optional
-            Line orientation axis.
-
-        Returns
-        -------
-        :class:`ansys.aedt.core.modeler.advanced_cad.stackup_3d.MachineLearningPatch`
-
-        Examples
-        --------
-
-        >>> from ansys.aedt.core import Hfss
-        >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
-        >>> hfss = Hfss()
-        >>> my_stackup = Stackup3D(hfss, 2.5e9)
-        >>> gnd = my_stackup.add_ground_layer("gnd")
-        >>> my_stackup.add_dielectric_layer("diel1", thickness=1.5, material="Duroid (tm)")
-        >>> top = my_stackup.add_signal_layer("top")
-        >>> my_patch = top.ml_patch(frequency=None, patch_width=51, patch_name="MLPatch")
-        >>> my_stackup.resize_around_element(my_patch)
-
-        """
-        if not patch_name:
-            patch_name = generate_unique_name(f"{self._name}_patch", n=3)
-        lst = self._stackup._layer_name
-        for i in range(len(lst)):
-            if lst[i] == self._name:
-                if self._stackup.stackup_layers[lst[i - 1]].type == "dielectric":
-                    below_layer = self._stackup.stackup_layers[lst[i - 1]]
-                    break
-                else:
-                    self._app.logger.error("The layer below the selected one must be of dielectric type")
-                    return False
-        created_patch = MachineLearningPatch(
-            self._app,
-            frequency,
-            patch_width,
-            signal_layer=self,
-            dielectric_layer=below_layer,
-            patch_position_x=patch_position_x,
-            patch_position_y=patch_position_y,
-            patch_name=patch_name,
-            axis=axis,
-        )
-        self._obj_3d.append(created_patch.aedt_object)
-        self._stackup._object_list.append(created_patch)
-        created_patch.aedt_object.group_name = f"Layer_{self._name}"
-        return created_patch
-
-    @pyaedt_function_handler()
     def add_trace(
         self,
         line_width,
@@ -811,7 +734,6 @@ class Layer3D(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss(new_desktop=True)
@@ -882,7 +804,6 @@ class Layer3D(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -1237,7 +1158,6 @@ class Stackup3D(object):
 
     Examples
     --------
-
     >>> from ansys.aedt.core import Hfss
     >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
     >>> hfss = Hfss(new_desktop=True)
@@ -1556,7 +1476,6 @@ class Stackup3D(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -1634,7 +1553,6 @@ class Stackup3D(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -1674,7 +1592,6 @@ class Stackup3D(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -1719,7 +1636,6 @@ class Stackup3D(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -1825,7 +1741,6 @@ class Stackup3D(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -2006,7 +1921,7 @@ class Patch(CommonObject, object):
     >>> patch = signal.add_patch(patch_length=9.57, patch_width=9.25, patch_name="Patch")
     >>> stackup.resize_around_element(patch)
     >>> pad_length = [3, 3, 3, 3, 3, 3]  # Air bounding box buffer in mm.
-    >>> region = hfss.modeler.create_region(pad_length,is_percentage=False)
+    >>> region = hfss.modeler.create_region(pad_length, is_percentage=False)
     >>> hfss.assign_radiation_boundary_to_objects(region)
     >>> patch.create_probe_port(gnd, rel_x_offset=0.485)
 
@@ -2122,7 +2037,7 @@ class Patch(CommonObject, object):
                 name=patch_name,
                 material=signal_layer.material_name,
             )
-            application.assign_coating(self._aedt_object.name, signal_layer.material)
+            application.assign_finite_conductivity(self._aedt_object.name, signal_layer.material)
         application.modeler.set_working_coordinate_system("Global")
         application.modeler.subtract(blank_list=[signal_layer.name], tool_list=[patch_name], keep_originals=True)
 
@@ -2352,11 +2267,11 @@ class Patch(CommonObject, object):
         er_e = self._effective_permittivity.name
         lbd = self._wave_length.name
         w = self._width.name
-        l = self.length.name
+        le = self.length.name
         er = self.permittivity.name
         patch_impedance_formula_l_w = "45 * (" + lbd + "/" + w + "* sqrt(" + er_e + ")) ** 2"
         patch_impedance_formula_w_l = "60 * " + lbd + "/" + w + "* sqrt(" + er_e + ")"
-        patch_impedance_balanis_formula = "90 *" + er + "**2/(" + er + " - 1) * " + l + "/" + w
+        patch_impedance_balanis_formula = "90 *" + er + "**2/(" + er + " - 1) * " + le + "/" + w
         self._impedance_l_w = NamedVariable(
             self.application, self._name + "_impedance_l_w", patch_impedance_formula_l_w
         )
@@ -2406,7 +2321,6 @@ class Patch(CommonObject, object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -2436,10 +2350,10 @@ class Patch(CommonObject, object):
         )
         z_ref = reference_layer.elevation.name + " + " + reference_layer.thickness.name
         probe_pos = [x_probe, y_probe, z_ref]  # Probe base position.
-        probe_wire = self.application.modeler.create_cylinder(
+        self.application.modeler.create_cylinder(
             orientation="Z", origin=probe_pos, radius=r, height=probe_height, name=name, material="copper"
         )
-        probe_feed_wire = self.application.modeler.create_cylinder(
+        self.application.modeler.create_cylinder(
             orientation="Z",
             origin=probe_pos,
             radius=r,
@@ -2492,7 +2406,6 @@ class Patch(CommonObject, object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -2518,7 +2431,7 @@ class Patch(CommonObject, object):
             + reference_layer.elevation.name
         )
         rect = self.application.modeler.create_rectangle(
-            orientation=constants.PLANE.YZ,
+            orientation=constants.Plane.YZ,
             origin=[string_position_x, string_position_y, string_position_z],
             sizes=[string_width, string_length],
             name=self.name + "_port",
@@ -2549,7 +2462,6 @@ class Patch(CommonObject, object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -2590,7 +2502,6 @@ class Patch(CommonObject, object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
         >>> hfss = Hfss()
@@ -3170,7 +3081,7 @@ class Trace(CommonObject, object):
             Variable Object.
         """
         # "c0 * 1000/(patch_frequency * sqrt(patch_eff_permittivity))"
-        # TODO it is currently only available for mm
+        # TODO: it is currently only available for mm
         f = self._frequency.name
         er_e = self.effective_permittivity.name
         patch_wave_length_formula = "(c0 * 1000/(" + f + "* sqrt(" + er_e + ")))mm"
@@ -3259,7 +3170,7 @@ class Trace(CommonObject, object):
             + reference_layer.elevation.name
         )
         port = self.application.modeler.create_rectangle(
-            orientation=constants.PLANE.YZ,
+            orientation=constants.Plane.YZ,
             origin=[string_position_x, string_position_y, string_position_z],
             sizes=[string_width, string_length],
             name=self.name + "_port",
@@ -3307,7 +3218,6 @@ class Polygon(CommonObject, object):
 
     Examples
     --------
-
     >>> from ansys.aedt.core import Hfss
     >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
     >>> hfss = Hfss(new_desktop=True)
@@ -3378,119 +3288,3 @@ class Polygon(CommonObject, object):
         """
         bb = self._aedt_object.bounding_box
         return [[bb[0], bb[1]], [bb[0], bb[4]], [bb[3], bb[4]], [bb[3], bb[1]]]
-
-
-class MachineLearningPatch(Patch, object):
-    """MachineLearningPatch Class in Stackup3D. Create an antenna whose length is predicted by a
-    machine learning algorithm.
-
-    The machine learning algorithm determines the length according to resonant frequency,
-    patch width, substrat thickness and relative permittivity. The other parameter have no or only a minor influence.
-    We can consider that the patch thickness has no influence as long as it is lower than 50 um,
-    for machine learning training is set to 35 um. The patch conductivity and other dielectric properties are
-    respectively those of copper and duroid (tm) for the machine learning training, but predictions work
-    regardless of the dielectric or the conductor. The predictions are, in the most of cases, better than the
-    predictions with formula used in the class Patch. The machine learning model used, is Support Vector Regression,
-    it is a classic model in the non-linear prediction, it can be used for other non-linear application.
-    Two models were created, one from 0.1 GHz to 1 GHz and another from 1 GHz to 10 GHz. The example of the creation of
-    these models is available in a PyAEDT example named Machine_learning_applied_to_Patch. The two databases and models
-    are available in PyAEDT in misc.
-
-    It is preferable to use the ml_patch method in the class Layer3D than directly the class constructor.
-
-    Parameters
-    ----------
-    application : :class:`ansys.aedt.core.hfss.Hfss`
-        HFSS design or project where the variable is to be created.
-    frequency : float, None
-        The patch frequency, it is used in prediction formulas. If it is None, the patch frequency will be that of the
-        layer or of the stackup. From 0.1 to 10 GHz.
-    dx : float
-        The patch width. From O.5 to 1.5 of the optimal width value : c0 * 1000/(2 * f * sqrt((er  + 1)/2))
-    signal_layer : :class:`ansys.aedt.core.modeler.advanced_cad.stackup_3d.Layer3D`
-        The signal layer where the patch will be drawn.
-    dielectric_layer : :class:`ansys.aedt.core.modeler.advanced_cad.stackup_3d.Layer3D`
-        The dielectric layer between the patch and the ground layer. Its permittivity and thickness are used in
-        prediction formulas. Thickness must be from 0.003 to 0.05 of the wavelength in vacuum and relative permittivity
-        from 1 to 12.
-    patch_position_x : float, optional
-        Patch x position, by default it is 0.
-    patch_position_y : float, optional
-        Patch y position, by default it is 0.
-    patch_name : str, optional
-        Patch name, by  default "patch".
-    reference_system : str, None, optional
-        Coordinate system of the patch. By default, None.
-    axis : str, optional
-        Patch length axis, by default ``"X"``.
-
-    Examples
-    --------
-
-    >>> from ansys.aedt.core import Hfss
-    >>> from ansys.aedt.core.modeler.advanced_cad.stackup_3d import Stackup3D
-    >>> hfss = Hfss()
-    >>> my_stackup = Stackup3D(hfss, 2.5e9)
-    >>> gnd = my_stackup.add_ground_layer("gnd")
-    >>> my_stackup.add_dielectric_layer("diel1", thickness=1.5, material="Duroid (tm)")
-    >>> top = my_stackup.add_signal_layer("top")
-    >>> my_patch = top.ml_patch(frequency=None, patch_width=51, patch_name="MLPatch")
-    >>> my_stackup.resize_around_element(my_patch)
-
-    """
-
-    def __init__(
-        self,
-        application,
-        frequency,
-        dx,
-        signal_layer,
-        dielectric_layer,
-        patch_position_x=0,
-        patch_position_y=0,
-        patch_name="patch",
-        reference_system=None,
-        axis="X",
-    ):
-        Patch.__init__(
-            self,
-            application,
-            frequency,
-            dx,
-            signal_layer,
-            dielectric_layer,
-            dy=None,
-            patch_position_x=patch_position_x,
-            patch_position_y=patch_position_y,
-            patch_name=patch_name,
-            reference_system=reference_system,
-            axis=axis,
-        )
-        self.predict_length()
-
-    def predict_length(self):
-        try:
-            import joblib
-            import numpy as np
-        except ImportError:  # pragma: no cover
-            raise ImportError("Package Joblib and Numpy are required to run ML.")
-        training_file = None
-        if 1e9 >= self.frequency.numeric_value >= 1e8:
-            training_file = os.path.join(pyaedt_path, "misc", "patch_svr_model_100MHz_1GHz.joblib")
-        elif 1e10 >= self.frequency.numeric_value > 1e9:
-            training_file = os.path.join(pyaedt_path, "misc", "patch_svr_model_1GHz_10GHz.joblib")
-        else:  # pragma: no cover
-            self.application.logger.error("This ML algorithm can only predict patch antennas from 100 MHz to 10 GHz.")
-        if training_file:
-            model = joblib.load(training_file)
-            list_for_array = [
-                [
-                    self.frequency.numeric_value,
-                    self.width.numeric_value,
-                    self._permittivity.numeric_value,
-                    self.dielectric_layer.thickness.numeric_value,
-                ]
-            ]
-            array_for_prediction = np.array(list_for_array, dtype=np.float32)
-            length = model.predict(array_for_prediction)[0]
-            self.length.expression = self.application.value_with_units(length)

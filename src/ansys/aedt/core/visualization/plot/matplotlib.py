@@ -27,30 +27,25 @@ import math
 import os
 import warnings
 
+import numpy as np
+
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.generic.settings import settings
+from ansys.aedt.core.internal.checks import ERROR_GRAPHICS_REQUIRED
+from ansys.aedt.core.internal.checks import check_graphics_available
 
+# Check that graphics are available
 try:
-    import numpy as np
-except ImportError:
-    warnings.warn(
-        "The NumPy module is required to run some functionalities of PostProcess.\n"
-        "Install with \n\npip install numpy"
-    )
+    check_graphics_available()
 
-try:
+    from matplotlib.animation import FuncAnimation
     from matplotlib.colors import Normalize
     from matplotlib.patches import PathPatch
     from matplotlib.path import Path
     import matplotlib.pyplot as plt
     import matplotlib.ticker as ticker
 except ImportError:
-    warnings.warn(
-        "The Matplotlib module is required to run some functionalities of PostProcess.\n"
-        "Install with \n\npip install matplotlib\n\nRequires CPython."
-    )
-except Exception:
-    warnings.warn("Unknown error occurred while attempting to import Matplotlib.")
+    warnings.warn(ERROR_GRAPHICS_REQUIRED)
 
 
 def is_notebook():
@@ -344,8 +339,8 @@ class Trace:
     def cartesian_data(self, val):
         self._cartesian_data = []
         for el in val:
-            if isinstance(el, (list, tuple)):
-                self._cartesian_data.append(np.array(el))
+            if not isinstance(el, (float, int, str)):
+                self._cartesian_data.append(np.array(el, dtype=float))
             else:
                 self._cartesian_data.append(el)
         if len(self._cartesian_data) == 2:
@@ -367,8 +362,8 @@ class Trace:
     def spherical_data(self, rthetaphi):
         self._spherical_data = []
         for el in rthetaphi:
-            if isinstance(el, (list, tuple)):
-                self._spherical_data.append(np.array(el))
+            if not isinstance(el, (float, int, str)):
+                self._spherical_data.append(np.array(el, dtype=float))
             else:
                 self._spherical_data.append(el)
         self.spherical2car()
@@ -391,6 +386,8 @@ class Trace:
         list, list
             R and theta.
         """
+        x = np.array(x, dtype=float)
+        y = np.array(y, dtype=float)
         rate = 1
         if not is_degree:
             rate = np.pi / 180
@@ -401,9 +398,9 @@ class Trace:
     @pyaedt_function_handler()
     def car2spherical(self):
         """Convert cartesian data to spherical and assigns to property spherical data."""
-        x = self._cartesian_data[0]
-        y = self._cartesian_data[1]
-        z = self._cartesian_data[2]
+        x = np.array(self.cartesian_data[0], dtype=float)
+        y = np.array(self.cartesian_data[1], dtype=float)
+        z = np.array(self.cartesian_data[2], dtype=float)
         r = np.sqrt(x * x + y * y + z * z)
         theta = np.arccos(z / r) * 180 / math.pi  # to degrees
         phi = np.arctan2(y, x) * 180 / math.pi
@@ -411,10 +408,10 @@ class Trace:
 
     @pyaedt_function_handler()
     def spherical2car(self):
-        """Convert sherical data to cartesian data and assign to cartesian data property."""
-        r = self._spherical_data[0]
-        theta = self._spherical_data[1] * math.pi / 180  # to radian
-        phi = self._spherical_data[2] * math.pi / 180
+        """Convert spherical data to cartesian data and assign to cartesian data property."""
+        r = np.array(self._spherical_data[0], dtype=float)
+        theta = np.array(self._spherical_data[1] * math.pi / 180, dtype=float)  # to radian
+        phi = np.array(self._spherical_data[2] * math.pi / 180, dtype=float)
         x = r * np.sin(theta) * np.cos(phi)
         y = r * np.sin(theta) * np.sin(phi)
         z = r * np.cos(theta)
@@ -434,6 +431,8 @@ class Trace:
         list
             List of [x,y].
         """
+        r = np.array(r, dtype=float)
+        theta = np.array(theta, dtype=float)
         x = r * np.cos(np.radians(theta))
         y = r * np.sin(np.radians(theta))
         return [x, y]
@@ -480,6 +479,9 @@ class ReportPlotter:
         self._style = None
         self.logo = None
         self.show_logo = True
+        self.animation = None
+        self.y_margin_factor = 0.2
+        self.x_margin_factor = 0.2
 
     @property
     def traces(self):
@@ -684,11 +686,10 @@ class ReportPlotter:
     # Open an image from a computer
     @pyaedt_function_handler()
     def _open_image_local(self):
-
         from PIL import Image
 
         if not self.logo:
-            self.logo = os.path.join(os.path.dirname(__file__), "../../generic/Ansys.png")
+            self.logo = os.path.join(os.path.dirname(__file__), "../../misc/Ansys.png")
         image = Image.open(self.logo)  # Open the image
         image_array = np.array(image)  # Convert to a numpy array
         return image_array  # Output
@@ -951,7 +952,10 @@ class ReportPlotter:
             ax_image.axis("off")  # Remove axis of the image
 
         if snapshot_path:
-            self.fig.savefig(snapshot_path)
+            if hasattr(self, "animation") and snapshot_path.endswith(".gif"):
+                self.animation.save(snapshot_path, writer="pillow", fps=2)
+            else:
+                self.fig.savefig(snapshot_path)
         if show:  # pragma: no cover
             if is_notebook():
                 pass
@@ -979,10 +983,10 @@ class ReportPlotter:
         if self.x_scale == "log":
             x_range = -1e-12
 
-        y_min = min_y - y_range * 0.2
-        y_max = max_y + y_range * 0.2
-        x_min = min_x - x_range * 0.2
-        x_max = max_x + x_range * 0.2
+        y_min = min_y - y_range * self.y_margin_factor
+        y_max = max_y + y_range * self.y_margin_factor
+        x_min = min_x - x_range * self.x_margin_factor
+        x_max = max_x + x_range * self.x_margin_factor
         return y_min, y_max, x_min, x_max
 
     @pyaedt_function_handler()
@@ -1251,6 +1255,62 @@ class ReportPlotter:
         return self.fig
 
     @pyaedt_function_handler()
+    def animate_2d(self, traces=None, snapshot_path=None, show=True, figure=None):
+        """Create an animated Matplotlib figure based on a list of data.
+
+        Parameters
+        ----------
+        traces : int, str, list, optional
+            Trace or traces to be plotted. It can be the trace name, the trace id or a list of those.
+        snapshot_path : str, optional
+            Full path to image file if a snapshot is needed.
+            The default value is ``None``.
+        show : bool, optional
+            Whether to show the plot or return the matplotlib object. Default is `True`.
+        figure : :class:`matplotlib.pyplot.Figure`, optional
+            An existing Matplotlib `Figure` to which the plot is added.
+            If not provided, a new `Figure` and `Axes` object are created.
+
+        Returns
+        -------
+        :class:`matplotlib.pyplot.Figure`
+            Matplotlib figure object.
+        """
+        self.animation = None
+
+        traces_to_plot = self._retrieve_traces(traces)
+        if not traces_to_plot:
+            return False
+
+        if not figure:
+            self.fig, self.ax = plt.subplots()
+        else:
+            self.fig = figure
+            self.ax = figure.add_subplot(111)
+
+        def update(i):
+            self.ax.clear()
+            trace = traces_to_plot[i]
+            line = self.ax.plot(
+                trace._cartesian_data[0],
+                trace._cartesian_data[1],
+                f"{trace.symbol_style}{trace.trace_style}",
+                fillstyle="full" if trace.fill_symbol else "none",
+                markeredgecolor=trace.symbol_color,
+                label=trace.name,
+                color=trace.trace_color,
+            )
+            self.ax.set(xlabel=trace.x_label, ylabel=trace.y_label, title=self.title)
+            if self.show_legend:
+                self.ax.legend(loc="upper right")
+            return line
+
+        self.animation = FuncAnimation(self.fig, update, frames=len(traces_to_plot), blit=True, repeat=True)
+
+        self._plot(snapshot_path, show)
+        return self.animation
+
+    @pyaedt_function_handler()
     def _plot_notes(self):
         for note in self._notes:
             t = self.ax.text(
@@ -1312,7 +1372,18 @@ class ReportPlotter:
 
     @pyaedt_function_handler()
     def plot_contour(
-        self, trace=0, polar=False, levels=64, max_theta=180, color_bar=None, snapshot_path=None, show=True, figure=None
+        self,
+        trace=0,
+        polar=False,
+        levels=64,
+        max_theta=180,
+        min_theta=0,
+        color_bar=None,
+        snapshot_path=None,
+        show=True,
+        figure=None,
+        is_spherical=True,
+        normalize=None,
     ):
         """Create a Matplotlib figure contour based on a list of data.
 
@@ -1330,6 +1401,93 @@ class ReportPlotter:
             The default is ``180``, which plots the data for all angles.
             Setting ``max_theta`` to 90 limits the displayed data to the upper
             hemisphere, that is (0 < theta < 90).
+        min_theta : float or int, optional
+            Minimum theta angle for plotting. It applies only for polar plots. The default is ``0``.
+        color_bar : str, optional
+            Color bar title. The default is ``None`` in which case the color bar is not included.
+        snapshot_path : str, optional
+            Full path to image file if a snapshot is needed.
+            The default value is ``None``.
+        show : bool, optional
+            Whether to show the plot or return the matplotlib object. Default is ``True``.
+        figure : :class:`matplotlib.pyplot.Figure`, optional
+            An existing Matplotlib `Figure` to which the plot is added.
+            If not provided, a new `Figure` and `Axes` object are created.
+        is_spherical : bool, optional
+            Whether to use spherical or cartesian data.
+        normalize : list, optional
+            Normalize the color scale using the provided ``[vmin, vmax]`` values.
+            If not provided or invalid, automatic normalization is applied.
+
+        Returns
+        -------
+        :class:`matplotlib.pyplot.Figure`
+            Matplotlib figure object.
+        """
+        tr = self._retrieve_traces(trace)
+        if not tr:
+            return False
+        else:
+            tr = tr[0]
+
+        projection = "polar" if polar else "rectilinear"
+
+        if not figure:
+            self.fig, self.ax = plt.subplots(subplot_kw={"projection": projection})
+            self.ax = plt.gca()
+        else:
+            self.fig = figure
+            self.ax = figure.add_subplot(111, polar=polar)
+
+        self.ax.set_xlabel(tr.x_label)
+        if polar:
+            self.ax.set_rticks(np.linspace(min_theta, max_theta, 3))
+            self.ax.set_theta_zero_location("N")
+            self.ax.set_theta_direction(-1)
+            self.ax.set_thetamin(min_theta)
+            self.ax.set_thetamax(max_theta)
+        else:
+            self.ax.set_ylabel(tr.y_label)
+
+        self.ax.set(title=self.title)
+
+        if not is_spherical:
+            ph = tr._cartesian_data[2]
+            th = tr._cartesian_data[1]
+            data_to_plot = tr._cartesian_data[0]
+        else:
+            ph = tr._spherical_data[2]
+            th = tr._spherical_data[1]
+            data_to_plot = tr._spherical_data[0]
+
+        norm = None
+        if isinstance(normalize, list) and len(normalize) == 2:
+            norm = Normalize(vmin=normalize[0], vmax=normalize[1])
+
+        contour = self.ax.contourf(ph, th, data_to_plot, levels=levels, cmap="jet", norm=norm, extend="both")
+        if color_bar:
+            cbar = self.fig.colorbar(contour, ax=self.ax)
+            cbar.set_label(color_bar, rotation=270, labelpad=20)
+
+        self.ax.yaxis.set_label_coords(-0.1, 0.5)
+        self._plot(snapshot_path, show)
+        return self.fig
+
+    @pyaedt_function_handler()
+    def plot_pcolor(
+        self,
+        trace=0,
+        color_bar=None,
+        snapshot_path=None,
+        show=True,
+        figure=None,
+    ):
+        """Create a Matplotlib figure pseudo color plot with a non-regular rectangular grid based on a list of data.
+
+        Parameters
+        ----------
+        trace : int, str, optional
+            Trace index on which create the 3D Plot.
         color_bar : str, optional
             Color bar title. The default is ``None`` in which case the color bar is not included.
         snapshot_path : str, optional
@@ -1351,6 +1509,96 @@ class ReportPlotter:
             return False
         else:
             tr = tr[0]
+        projection = "rectilinear"
+
+        if not figure:
+            self.fig, self.ax = plt.subplots(subplot_kw={"projection": projection})
+            self.ax = plt.gca()
+        else:
+            self.fig = figure
+            self.ax = figure.add_subplot(111, polar=False)
+
+        self.ax.set_xlabel(tr.x_label)
+        self.ax.set_ylabel(tr.y_label)
+
+        self.ax.set(title=self.title)
+        X = np.array(list(zip(*tr._cartesian_data[2]))[0])
+        dxO2 = (X[1] - X[0]) / 2
+        X = np.linspace(X[0] - dxO2, X[-1] + dxO2, len(X) + 1)
+        Y = np.array(tr._cartesian_data[1][0])
+        dyO2 = (Y[1] - Y[0]) / 2
+        Y = np.linspace(Y[0] - dyO2, Y[-1] + dyO2, len(Y) + 1)
+        data_to_plot = tr._cartesian_data[0]
+
+        contour = self.ax.pcolormesh(X, Y, data_to_plot.T, cmap="jet", shading="flat")
+        if color_bar:
+            cbar = self.fig.colorbar(contour, ax=self.ax)
+            cbar.set_label(color_bar, rotation=270, labelpad=20)
+
+        self.ax.yaxis.set_label_coords(-0.1, 0.5)
+        self._plot(snapshot_path, show)
+        return self.fig
+
+    @pyaedt_function_handler()
+    def animate_contour(
+        self,
+        trace=0,
+        polar=False,
+        levels=64,
+        max_theta=180,
+        min_theta=0,
+        color_bar=None,
+        snapshot_path=None,
+        show=True,
+        figure=None,
+        is_spherical=True,
+        normalize=None,
+    ):
+        """Create an animated Matplotlib figure contour based on a list of data.
+
+        Parameters
+        ----------
+        trace : int, str, optional
+            Trace index on which create the 3D Plot.
+        polar : bool, optional
+            Generate the plot in polar coordinates. The default is ``True``. If ``False``, the plot
+            generated is rectangular.
+        levels : int, optional
+            Color map levels. The default is ``64``.
+        max_theta : float or int, optional
+            Maximum theta angle for plotting. It applies only for polar plots.
+            The default is ``180``, which plots the data for all angles.
+            Setting ``max_theta`` to 90 limits the displayed data to the upper
+            hemisphere, that is (0 < theta < 90).
+        min_theta : float or int, optional
+            Minimum theta angle for plotting. It applies only for polar plots. The default is ``0``.
+        color_bar : str, optional
+            Color bar title. The default is ``None`` in which case the color bar is not included.
+        snapshot_path : str, optional
+            Full path to image file if a snapshot is needed.
+            The default value is ``None``.
+        show : bool, optional
+            Whether to show the plot or return the matplotlib object. Default is ``True``.
+        figure : :class:`matplotlib.pyplot.Figure`, optional
+            An existing Matplotlib `Figure` to which the plot is added.
+            If not provided, a new `Figure` and `Axes` object are created.
+        is_spherical : bool, optional
+            Whether to use spherical or cartesian data.
+        normalize : list, optional
+            Normalize the color scale using the provided ``[vmin, vmax]`` values.
+            If not provided or invalid, automatic normalization is applied.
+
+        Returns
+        -------
+        :class:`matplotlib.pyplot.Figure`
+            Matplotlib figure object.
+        """
+        self.animation = None
+
+        traces_to_plot = self._retrieve_traces(trace)
+        if not traces_to_plot:
+            return False
+
         projection = "polar" if polar else "rectilinear"
 
         if not figure:
@@ -1360,30 +1608,54 @@ class ReportPlotter:
             self.fig = figure
             self.ax = figure.add_subplot(111, polar=polar)
 
-        self.ax.set_xlabel(tr.x_label)
-        if polar:
-            self.ax.set_rticks(np.linspace(0, max_theta, 3))
-        else:
-            self.ax.set_ylabel(tr.y_label)
+        def update(i):
+            self.ax.clear()
+            trace = traces_to_plot[i]
+            self.ax.set_xlabel(trace.x_label)
+            if polar:
+                self.ax.set_rticks(np.linspace(min_theta, max_theta, 3))
+                self.ax.set_theta_zero_location("N")
+                self.ax.set_theta_direction(-1)
+                self.ax.set_thetamin(min_theta)
+                self.ax.set_thetamax(max_theta)
+            else:
+                self.ax.set_ylabel(trace.y_label)
 
-        self.ax.set(title=self.title)
-        ph = tr._spherical_data[2]
-        th = tr._spherical_data[1]
-        data_to_plot = tr._spherical_data[0]
-        contour = self.ax.contourf(
-            ph,
-            th,
-            data_to_plot,
-            levels=levels,
-            cmap="jet",
-        )
-        if color_bar:
-            cbar = self.fig.colorbar(contour, ax=self.ax)
-            cbar.set_label(color_bar, rotation=270, labelpad=20)
+            self.ax.set(title=self.title)
 
-        self.ax.yaxis.set_label_coords(-0.1, 0.5)
+            if not is_spherical:
+                ph = trace._cartesian_data[2]
+                th = trace._cartesian_data[1]
+                data_to_plot = trace._cartesian_data[0]
+            else:
+                ph = trace._spherical_data[2]
+                th = trace._spherical_data[1]
+                data_to_plot = trace._spherical_data[0]
+
+            norm = None
+            if isinstance(normalize, list) and len(normalize) == 2:
+                norm = Normalize(vmin=normalize[0], vmax=normalize[1])
+
+            contour = self.ax.contourf(
+                ph,
+                th,
+                data_to_plot,
+                levels=levels,
+                cmap="jet",
+                norm=norm,
+                extend="both",
+            )
+            if color_bar:
+                cbar = self.fig.colorbar(contour, ax=self.ax)
+                cbar.set_label(color_bar, rotation=270, labelpad=20)
+
+            self.ax.yaxis.set_label_coords(-0.1, 0.5)
+            return contour
+
+        self.animation = FuncAnimation(self.fig, update, frames=len(traces_to_plot), blit=False, repeat=True)
+
         self._plot(snapshot_path, show)
-        return self.fig
+        return self.animation
 
 
 @pyaedt_function_handler()

@@ -4,7 +4,8 @@ PyAEDT documentation  |version|
 **Useful links**:
 `Installation <https://aedt.docs.pyansys.com/version/stable/Getting_started/Installation.html>`_ |
 `Source Repository <https://github.com/ansys/pyaedt>`_ |
-`Issues <https://github.com/ansys/pyaedt/issues>`_
+`Issues <https://github.com/ansys/pyaedt/issues>`_ |
+`Extensions <https://aedt.docs.pyansys.com/version/stable/User_guide/extensions.html>`_
 
 .. figure:: _static/logo.png
     :align: center
@@ -67,3 +68,4 @@ enabling straightforward and efficient automation in your workflow.
     User_guide/index
     API/index
     Examples <https://examples.aedt.docs.pyansys.com/>
+    changelog

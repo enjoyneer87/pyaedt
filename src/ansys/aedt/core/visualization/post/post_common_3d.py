@@ -29,36 +29,29 @@ This module provides all functionalities for creating and editing plots in the 3
 
 """
 
-
-import ast
 import os
-import random
+from pathlib import Path
+import secrets
 import string
+from typing import Dict
+from typing import Literal
+from typing import Optional
+from typing import Tuple
 import warnings
 
+import numpy as np
+
 from ansys.aedt.core.generic.constants import unit_converter
-from ansys.aedt.core.generic.general_methods import check_and_download_file
-from ansys.aedt.core.generic.general_methods import generate_unique_name
-from ansys.aedt.core.generic.general_methods import open_file
+from ansys.aedt.core.generic.file_utils import check_and_download_file
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.numbers import decompose_variable_value
 from ansys.aedt.core.generic.settings import settings
+from ansys.aedt.core.internal.checks import min_aedt_version
 from ansys.aedt.core.modeler.cad.elements_3d import FacePrimitive
-from ansys.aedt.core.visualization.plot.pyvista import ModelPlotter
 from ansys.aedt.core.visualization.post.common import PostProcessorCommon
-from ansys.aedt.core.visualization.post.fields_calculator import FieldsCalculator
-
-try:
-    import numpy as np
-except ImportError:
-    np = None
-    warnings.warn(
-        "The NumPy module is required to run some functionalities of PostProcess.\n"
-        "Install with \n\npip install numpy"
-    )
-
 from ansys.aedt.core.visualization.post.field_data import FieldPlot
-from ansys.aedt.core.visualization.post.vrt_data import VRTFieldPlot
+from ansys.aedt.core.visualization.post.fields_calculator import FieldsCalculator
 from ansys.aedt.core.visualization.report.constants import ORIENTATION_TO_VIEW
 
 
@@ -231,6 +224,8 @@ class PostProcessor3D(PostProcessorCommon):
                 elif k in ["Phase", "phase"]:
                     intrinsics["Phase"] = v
                 elif k in ["Time", "time"]:
+                    if self._app.solution_type == "SteadyState":
+                        continue
                     intrinsics["Time"] = v
                 if input_phase:
                     intrinsics["Phase"] = input_phase
@@ -353,36 +348,6 @@ class PostProcessor3D(PostProcessorCommon):
                         f"Something went wrong with setup {setup} while retrieving fields plot."
                     )  # pragma: no cover
         return plots
-
-    # TODO: define a fields calculator module and make robust !!
-    @pyaedt_function_handler(object_name="assignment")
-    def volumetric_loss(self, assignment):
-        """Use the field calculator to create a variable for volumetric losses.
-
-        Parameters
-        ----------
-        assignment : str
-            Name of the object to compute volumetric losses on.
-
-        Returns
-        -------
-        str
-            Name of the variable created.
-
-        References
-        ----------
-        >>> oModule.EnterQty
-        >>> oModule.EnterVol
-        >>> oModule.CalcOp
-        >>> oModule.AddNamedExpression
-        """
-        oModule = self.ofieldsreporter
-        oModule.EnterQty("OhmicLoss")
-        oModule.EnterVol(assignment)
-        oModule.CalcOp("Integrate")
-        name = f"P_{assignment}"  # Need to check for uniqueness !
-        oModule.AddNamedExpression(name, "Fields")
-        return name
 
     @pyaedt_function_handler(plotname="plot_name", propertyname="property_name", propertyval="property_value")
     def change_field_property(self, plot_name, property_name, property_value):
@@ -550,15 +515,15 @@ class PostProcessor3D(PostProcessorCommon):
 
         variation.extend(intrinsics)
 
-        file_name = os.path.join(self._app.working_directory, generate_unique_name("temp_fld") + ".fld")
-        self.ofieldsreporter.CalculatorWrite(file_name, ["Solution:=", solution], variation)
+        file_name = Path(self._app.working_directory) / (generate_unique_name("temp_fld") + ".fld")
+        self.ofieldsreporter.CalculatorWrite(str(file_name), ["Solution:=", solution], variation)
         value = None
-        if os.path.exists(file_name) or settings.remote_rpc_session:
+        if file_name.exists() or settings.remote_rpc_session:
             with open_file(file_name, "r") as f:
                 lines = f.readlines()
                 lines = [line.strip() for line in lines]
                 value = lines[-1]
-            os.remove(file_name)
+            file_name.unlink()
         self.ofieldsreporter.CalcStack("clear")
         return float(value)
 
@@ -666,7 +631,7 @@ class PostProcessor3D(PostProcessorCommon):
         >>> var = hfss.available_variations.nominal_values
         >>> setup = "Setup1 : LastAdaptive"
         >>> path = "Field.fld"
-        >>> hfss.post.export_field_file_on_grid("E",setup,var,path,'Cartesian',[0, 0, 0],intrinsics="8GHz")
+        >>> hfss.post.export_field_file_on_grid("E", setup, var, path, "Cartesian", [0, 0, 0], intrinsics="8GHz")
         """
         intrinsics = self._check_intrinsics(intrinsics, phase, solution, return_list=True)
         self.logger.info("Exporting %s field. Be patient", quantity)
@@ -682,9 +647,9 @@ class PostProcessor3D(PostProcessorCommon):
         if not solution:
             solution = self._app.existing_analysis_sweeps[0]
         if not file_name:
-            file_name = os.path.join(self._app.working_directory, f"{quantity}_{solution.replace(' : ', '_')}.fld")
-        elif os.path.isdir(file_name):
-            file_name = os.path.join(file_name, f"{quantity}_{solution.replace(' : ', '_')}.fld")
+            file_name = Path(self._app.working_directory, f"{quantity}_{solution.replace(' : ', '_')}.fld")
+        elif Path(file_name).is_dir():
+            file_name = Path(file_name) / f"{quantity}_{solution.replace(' : ', '_')}.fld"
         self.ofieldsreporter.CalcStack("clear")
         try:
             self.ofieldsreporter.EnterQty(quantity)
@@ -740,7 +705,7 @@ class PostProcessor3D(PostProcessorCommon):
         ]
 
         self.ofieldsreporter.ExportOnGrid(
-            file_name,
+            str(file_name),
             grid_start_wu,
             grid_stop_wu,
             grid_step_wu,
@@ -751,8 +716,8 @@ class PostProcessor3D(PostProcessorCommon):
             grid_center,
             False,
         )
-        if os.path.exists(file_name):
-            return file_name
+        if Path(file_name).exists():
+            return str(file_name)
         return False  # pragma: no cover
 
     @pyaedt_function_handler(
@@ -848,7 +813,6 @@ class PostProcessor3D(PostProcessorCommon):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Maxwell3d
         >>> m3d = Maxwell3d()
         >>> # Intrinsics is provided as a string.
@@ -856,7 +820,7 @@ class PostProcessor3D(PostProcessorCommon):
         >>> hfss_app.post.export_field_file(quantity="Mag_E", output_file=fld_file1, assignment="Box1",
         >>>                                 intrinsics="1GHz", phase="5deg")
         >>> # Intrinsics is provided as dictionary. Phase is automatically assigned to 0deg.
-        >>> fld_file2 =  "test_fld_hfss2.fld"
+        >>> fld_file2 = "test_fld_hfss2.fld"
         >>> hfss_app.post.export_field_file(quantity="Mag_E", output_file=fld_file2, assignment="Box1",
         >>>                                intrinsics={"frequency":"1GHz"})
         >>> # Intrinsics is provided as dictionary. Phase is provided.
@@ -867,7 +831,7 @@ class PostProcessor3D(PostProcessorCommon):
         >>>                                     )
         """
         intrinsics = self._check_intrinsics(intrinsics, phase, solution, return_list=True)
-        self.logger.info("Exporting %s field. Be patient", quantity)
+        self.logger.info(f"Exporting '{quantity}' field. Please be patient.")
         if not solution:
             if not self._app.existing_analysis_sweeps:
                 self.logger.error("There are no existing sweeps.")
@@ -876,9 +840,9 @@ class PostProcessor3D(PostProcessorCommon):
         if not output_file:
             appendix = ""
             ext = ".fld"
-            output_file = os.path.join(self._app.working_directory, solution.replace(" : ", "_") + appendix + ext)
+            output_file = Path(self._app.working_directory) / (solution.replace(" : ", "_") + appendix + ext)
         else:
-            output_file = output_file.replace("//", "/").replace("\\", "/")
+            output_file = Path(output_file).resolve()
         self.ofieldsreporter.CalcStack("clear")
         try:
             self.ofieldsreporter.EnterQty(quantity)
@@ -910,7 +874,7 @@ class PostProcessor3D(PostProcessorCommon):
                 args = ["Solution:=", solution, "Geometry:=", assignment, "GeometryType:=", objects_type]
             else:
                 args = ["Solution:=", solution]
-            self.ofieldsreporter.CalculatorWrite(output_file, args, variation)
+            self.ofieldsreporter.CalculatorWrite(str(output_file), args, variation)
         elif sample_points_file:
             export_options = [
                 "NAME:ExportOption",
@@ -924,14 +888,14 @@ class PostProcessor3D(PostProcessorCommon):
                 export_field_in_reference,
             ]
             self.ofieldsreporter.ExportToFile(
-                output_file,
-                sample_points_file,
+                str(output_file),
+                str(sample_points_file),
                 solution,
                 variation,
                 export_options,
             )
         else:
-            sample_points_file = os.path.join(self._app.working_directory, "temp_points.pts")
+            sample_points_file = Path(self._app.working_directory) / "temp_points.pts"
             with open_file(sample_points_file, "w") as f:
                 f.write(f"Unit={self.model_units}\n")
                 for point in sample_points:
@@ -948,14 +912,14 @@ class PostProcessor3D(PostProcessorCommon):
                 export_field_in_reference,
             ]
             self.ofieldsreporter.ExportToFile(
-                output_file,
-                sample_points_file,
+                str(output_file),
+                str(sample_points_file),
                 solution,
                 variation,
                 export_options,
             )
 
-        if os.path.exists(output_file):
+        if Path(output_file).exists():
             return output_file
         return False  # pragma: no cover
 
@@ -970,7 +934,7 @@ class PostProcessor3D(PostProcessorCommon):
         ----------
         plot_name : str
             Name of the plot.
-        output_dir : str
+        output_dir : str or :class:`pathlib.Path`
             Path for saving the file.
         file_name : str, optional
             Name of the file. The default is ``""``, in which case a name is automatically assigned.
@@ -988,11 +952,11 @@ class PostProcessor3D(PostProcessorCommon):
         """
         if not file_name:
             file_name = plot_name
-        output_dir = os.path.join(output_dir, file_name + "." + file_format)
+        output_dir = Path(output_dir) / (file_name + "." + file_format)
         try:
-            self.ofieldsreporter.ExportFieldPlot(plot_name, False, output_dir)
+            self.ofieldsreporter.ExportFieldPlot(plot_name, False, str(output_dir))
             if settings.remote_rpc_session_temp_folder:  # pragma: no cover
-                local_path = os.path.join(settings.remote_rpc_session_temp_folder, file_name + "." + file_format)
+                local_path = Path(settings.remote_rpc_session_temp_folder) / (file_name + "." + file_format)
                 output_dir = check_and_download_file(local_path, output_dir)
             return output_dir
         except Exception:  # pragma: no cover
@@ -1095,7 +1059,7 @@ class PostProcessor3D(PostProcessorCommon):
 
         char_set = string.ascii_uppercase + string.digits
         if not plot_name:
-            plot_name = quantity + "_" + "".join(random.sample(char_set, 6))
+            plot_name = quantity + "_" + "".join(secrets.choice(char_set) for _ in range(6))
         filter_boxes = [] if filter_boxes is None else filter_boxes
         if list_type == "CutPlane":
             plot = FieldPlot(self, cutplanes=assignment, solution=setup, quantity=quantity, intrinsics=intrinsics)
@@ -1126,60 +1090,6 @@ class PostProcessor3D(PostProcessorCommon):
             else:
                 return False
         return plot
-
-    @pyaedt_function_handler(quantityName="quantity", setup_name="setup")
-    def _create_fieldplot_line_traces(
-        self,
-        seeding_faces_ids,
-        in_volume_tracing_ids,
-        surface_tracing_ids,
-        quantity,
-        setup,
-        intrinsics,
-        plot_name=None,
-        field_type="",
-    ):
-        if not setup:
-            setup = self._app.existing_analysis_sweeps[0]
-        if not intrinsics:
-            for i in self._app.setups:
-                if i.name == setup.split(" : ")[0]:
-                    intrinsics = i.default_intrinsics
-        self._app.desktop_class.close_windows()
-        try:
-            self._app.modeler.fit_all()
-        except Exception:
-            self.logger.debug(
-                "Something went wrong with `fit_all` while creating field plot with line traces."
-            )  # pragma: no cover
-        self._desktop.TileWindows(0)
-        self._app.desktop_class.active_design(self._oproject, self._app.design_name)
-
-        char_set = string.ascii_uppercase + string.digits
-        if not plot_name:
-            plot_name = quantity + "_" + "".join(random.sample(char_set, 6))
-        plot = FieldPlot(
-            self,
-            objects=in_volume_tracing_ids,
-            surfaces=surface_tracing_ids,
-            solution=setup,
-            quantity=quantity,
-            intrinsics=intrinsics,
-            seeding_faces=seeding_faces_ids,
-        )
-        if field_type:
-            plot.field_type = field_type
-        plot.name = plot_name
-        plot.plot_folder = plot_name
-
-        plt = plot.create()
-        if "Maxwell" in self._app.design_type and self.post_solution_type == "Transient":
-            self.ofieldsreporter.SetPlotsViewSolutionContext([plot_name], setup, "Time:" + intrinsics["Time"])
-        if plt:
-            self.field_plots[plot_name] = plot
-            return plot
-        else:
-            return False
 
     @pyaedt_function_handler(objlist="assignment", quantityName="quantity", setup_name="setup")
     def create_fieldplot_line(
@@ -1246,490 +1156,6 @@ class PostProcessor3D(PostProcessorCommon):
             self.logger.info(f"Plot {plot_name} exists. returning the object.")
             return self.field_plots[plot_name]
         return self._create_fieldplot(assignment, quantity, setup, intrinsics, "Line", plot_name, field_type=field_type)
-
-    @pyaedt_function_handler(IntrinsincDict="intrinsics", setup_name="setup")
-    def create_fieldplot_line_traces(
-        self,
-        seeding_faces,
-        in_volume_tracing_objs=None,
-        surface_tracing_objs=None,
-        setup=None,
-        intrinsics=None,
-        plot_name=None,
-        field_type="DC R/L Fields",
-    ):
-        """
-        Create a field plot of the line.
-
-        Parameters
-        ----------
-        seeding_faces : list
-            List of seeding faces.
-        in_volume_tracing_objs : list
-            List of the in-volume tracing objects.
-        surface_tracing_objs : list
-            List of the surface tracing objects.
-        setup : str, optional
-            Name of the setup in the format ``"setupName : sweepName"``. The default
-            is ``None``.
-        intrinsics : dict, str, optional
-            Intrinsic variables required to compute the field before the export.
-            These are typically: frequency, time and phase.
-            It can be provided either as a dictionary or as a string.
-            If it is a dictionary, keys depend on the solution type and can be expressed in lower or camel case as:
-            - ``"Freq"`` or ``"Frequency"``.
-            - ``"Time"``.
-            - ``"Phase"``.
-            If it is a string, it can either be ``"Freq"`` or ``"Time"`` depending on the solution type.
-            The default is ``None`` in which case the intrinsics value is automatically computed based on the setup.
-        plot_name : str, optional
-            Name of the field plot to create. The default is ``None``.
-        field_type : str, optional
-            Field type to plot. Valid only for Q3D Field plots.
-
-        Returns
-        -------
-        type
-            Plot object.
-
-        References
-        ----------
-        >>> oModule.CreateFieldPlot
-
-        Examples
-        --------
-        >>> from ansys.aedt.core import Maxwell2d
-        >>> aedtapp = Maxwell2d()
-        >>> # Intrinsics is provided as a dictionary.
-        >>> intrinsics = {"Freq": "5GHz", "Phase": "180deg"}
-        >>> min_value = aedtapp.post.get_scalar_field_value(quantity_name, "Minimum", setup_name, intrinsics=intrinsics)
-        >>> plot1 = aedtapp.post.create_fieldplot_line_traces(seeding_faces=["Ground", "Electrode", "Region"],
-        >>>                                                   in_volume_tracing_objs="Region",
-        >>>                                                   plot_name="LineTracesTest",
-        >>>                                                   intrinsics=intrinsics)
-        >>> # Intrinsics is provided as a string. Phase is automatically assigned to 0deg.
-        >>> min_value = aedtapp.post.get_scalar_field_value(quantity_name, "Minimum", setup_name, intrinsics="5GHz")
-        >>> plot1 = aedtapp.post.create_fieldplot_line_traces(seeding_faces=["Ground", "Electrode", "Region"],
-        >>>                                                   in_volume_tracing_objs="Region",
-        >>>                                                   plot_name="LineTracesTest",
-        >>>                                                   intrinsics="200Hz")
-        """
-        intrinsics = self._check_intrinsics(intrinsics, setup=setup)
-        if self._app.solution_type != "Electrostatic":
-            self.logger.error("Field line traces is valid only for electrostatic solution")
-            return False
-        if plot_name and plot_name in list(self.field_plots.keys()):
-            self.logger.info(f"Plot {plot_name} exists. returning the object.")
-            return self.field_plots[plot_name]
-        if not isinstance(seeding_faces, list):
-            seeding_faces = [seeding_faces]
-        seeding_faces_ids = []
-        for face in seeding_faces:
-            if self._app.modeler[face]:
-                seeding_faces_ids.append(self._app.modeler[face].id)
-            else:
-                self.logger.error(f"Object {face} doesn't exist in current design")
-                return False
-        in_volume_tracing_ids = []
-        if not in_volume_tracing_objs:
-            in_volume_tracing_ids.append(0)
-        elif not isinstance(in_volume_tracing_objs, list):
-            in_volume_tracing_objs = [in_volume_tracing_objs]
-            for obj in in_volume_tracing_objs:
-                if self._app.modeler[obj]:
-                    in_volume_tracing_ids.append(self._app.modeler[obj].id)
-                else:
-                    self.logger.error(f"Object {obj} doesn't exist in current design")
-                    return False
-        elif isinstance(in_volume_tracing_objs, list):
-            for obj in in_volume_tracing_objs:
-                if not self._app.modeler[obj]:
-                    self.logger.error(f"Object {obj} doesn't exist in current design")
-                    return False
-        surface_tracing_ids = []
-        if not surface_tracing_objs:
-            surface_tracing_ids.append(0)
-        elif not isinstance(surface_tracing_objs, list):
-            surface_tracing_objs = [surface_tracing_objs]
-            for obj in surface_tracing_objs:
-                if self._app.modeler[obj]:
-                    surface_tracing_ids.append(self._app.modeler[obj].id)
-                else:
-                    self.logger.error(f"Object {obj} doesn't exist in current design")
-                    return False
-        elif isinstance(surface_tracing_objs, list):
-            for obj in surface_tracing_objs:
-                if not self._app.modeler[obj]:
-                    self.logger.error(f"Object {obj} doesn't exist in current design")
-                    return False
-        seeding_faces_ids.insert(0, len(seeding_faces_ids))
-        if in_volume_tracing_ids != [0]:
-            in_volume_tracing_ids.insert(0, len(in_volume_tracing_ids))
-        if surface_tracing_ids != [0]:
-            surface_tracing_ids.insert(0, len(surface_tracing_ids))
-        return self._create_fieldplot_line_traces(
-            seeding_faces_ids,
-            in_volume_tracing_ids,
-            surface_tracing_ids,
-            "FieldLineTrace",
-            setup,
-            intrinsics,
-            plot_name,
-            field_type=field_type,
-        )
-
-    @pyaedt_function_handler()
-    def _get_all_3dl_layers_nets(self, setup):
-        try:
-            get_ids = self._odesign.GetGeometryIdsForAllNetLayerCombinations(setup)
-        except Exception:  # pragma no cover
-            get_ids = []
-        k = 0
-        get_ids_dict = {}
-        key = ""
-        list_to_add = []
-        while k < len(get_ids):
-            if get_ids[k].startswith("PlotGeomInfo"):
-                if key:
-                    get_ids_dict[key] = list_to_add
-                key = get_ids[k].replace("PlotGeomInfo for ", "").replace(" (net/layer combination):", "")
-                list_to_add = []
-            else:
-                try:
-                    list_to_add.append(int(get_ids[k]))
-                except ValueError:
-                    pass
-            k = k + 1
-        return get_ids_dict
-
-    @pyaedt_function_handler()
-    def _get_3dl_layers_nets(self, layers, nets, setup, include_dielectrics):
-        lst_faces = []
-        new_layers = []
-        ids_dict = self._get_all_3dl_layers_nets(setup)
-        if not layers:
-            if include_dielectrics:
-                new_layers.extend([f"{i}" for i in self._app.modeler.edb.stackup.dielectric_layers.keys()])
-            for layer in self._app.modeler.edb.stackup.signal_layers.keys():
-                if not nets:
-                    nets = list(self._app.modeler.edb.nets.nets.keys())
-                for el in nets:
-                    if f"{el}/{layer}" in ids_dict:
-                        lst_faces.extend(ids_dict[f"{el}/{layer}"])
-        else:
-            for layer in layers:
-                if layer in self._app.modeler.edb.stackup.dielectric_layers and include_dielectrics:
-                    new_layers.append(f"{layer}")
-                elif layer in self._app.modeler.edb.stackup.signal_layers:
-                    if not nets:
-                        nets = list(self._app.modeler.edb.nets.nets.keys())
-                    for el in nets:
-                        if f"{el}/{layer}" in ids_dict:
-                            lst_faces.extend(ids_dict[f"{el}/{layer}"])
-        return lst_faces, new_layers
-
-    @pyaedt_function_handler()
-    def _get_3d_layers_nets(self, layers, nets):
-        dielectrics = []
-        new_layers = []
-        for k, v in self._app.modeler.user_defined_components.items():
-            if v.layout_component:
-                if not layers:
-                    layers = [i for i in v.layout_component.edb_object.stackup.stackup_layers.keys()]
-                if not nets:
-                    nets = [""] + [i for i in v.layout_component.edb_object.nets.nets.keys()]
-                for layer in layers:
-                    if layer in v.layout_component.edb_object.stackup.signal_layers:
-                        new_layers.append([layer] + nets)
-                    elif layer in v.layout_component.edb_object.stackup.dielectric_layers:
-                        dielectrics.append(f"{k}:{layer}")
-        return dielectrics, new_layers
-
-    @pyaedt_function_handler()
-    def create_fieldplot_layers(
-        self, layers, quantity, setup=None, nets=None, plot_on_surface=True, intrinsics=None, name=None
-    ):
-        # type: (list, str, str, list, bool, dict, str) -> FieldPlot
-        """Create a field plot of stacked layer plot.
-
-        This plot is valid from AEDT 2023 R2 and later in HFSS 3D Layout. Nets can be used as a filter.
-        Dielectrics will be included into the plot.
-        It works when a layout components in 3d modeler is used.
-
-        Parameters
-        ----------
-        layers : list
-            List of layers to plot. For example:
-            ``["Layer1","Layer2"]``. If empty list is provided
-            all layers are considered.
-        quantity : str
-            Name of the quantity to plot.
-        setup : str, optional
-            Name of the setup. The default is ``None``, in which case the ``nominal_adaptive``
-            setup is used. Make sure to build a setup string in the form of
-            ``"SetupName : SetupSweep"``, where ``SetupSweep`` is the sweep name to
-            use in the export or ``LastAdaptive``.
-        nets : list, optional
-            List of nets to filter the field plot. Optional.
-        plot_on_surface : bool, optional
-            Whether if the plot has to be on surfaces or inside the objects.
-            It is applicable only to layout components. Default is ``True``.
-        intrinsics : dict, str, optional
-            Intrinsic variables required to compute the field before the export.
-            These are typically: frequency, time and phase.
-            It can be provided either as a dictionary or as a string.
-            If it is a dictionary, keys depend on the solution type and can be expressed in lower or camel case as:
-
-            - ``"Freq"`` or ``"Frequency"``.
-            - ``"Time"``.
-            - ``"Phase"``.
-
-            If it is a string, it can either be ``"Freq"`` or ``"Time"`` depending on the solution type.
-            The default is ``None`` in which case the intrinsics value is automatically computed based on the setup.
-        name : str, optional
-            Name of the field plot to create.
-
-        Returns
-        -------
-        :class:``ansys.aedt.core.modules.solutions.FieldPlot`` or bool
-            Plot object.
-
-        References
-        ----------
-        >>> oModule.CreateFieldPlot
-        """
-        intrinsics = self._check_intrinsics(intrinsics, setup=setup)
-        if not setup:
-            setup = self._app.existing_analysis_sweeps[0]
-        if nets is None:
-            nets = []
-        if not (
-            "APhi" in self.post_solution_type and settings.aedt_version >= "2023.2"
-        ) and not self._app.design_type in ["HFSS", "HFSS 3D Layout Design"]:
-            self.logger.error("This method requires AEDT 2023 R2 and Maxwell 3D Transient APhi Formulation.")
-            return False
-        if name and name in list(self.field_plots.keys()):
-            self.logger.info(f"Plot {name} exists. returning the object.")
-            return self.field_plots[name]
-
-        if self._app.design_type in ["HFSS 3D Layout Design"]:
-            lst_faces, new_layers = self._get_3dl_layers_nets(layers, nets, setup, include_dielectrics=True)
-            if new_layers:
-                plt = self._create_fieldplot(
-                    new_layers, quantity, setup, intrinsics, "ObjList", name, create_plot=False
-                )
-                plt.surfaces = lst_faces
-                out = plt.create()
-                if out:
-                    return plt
-                return False
-            else:
-                return self._create_fieldplot(lst_faces, quantity, setup, intrinsics, "FacesList", name)
-        else:
-            dielectrics, new_layers = self._get_3d_layers_nets(layers, nets)
-            if plot_on_surface:
-                plot_type = "LayerNetsExtFace"
-            else:
-                plot_type = "LayerNets"
-            if new_layers:
-                plt = self._create_fieldplot(
-                    new_layers, quantity, setup, intrinsics, plot_type, name, create_plot=False
-                )
-                if dielectrics:
-                    plt.volumes = dielectrics
-                out = plt.create()
-                if out:
-                    return plt
-            elif dielectrics:
-                return self._create_fieldplot(dielectrics, quantity, setup, intrinsics, "ObjList", name)
-            return False
-
-    @pyaedt_function_handler()
-    def create_fieldplot_nets(
-        self, nets, quantity, setup=None, layers=None, plot_on_surface=True, intrinsics=None, name=None
-    ):
-        # type: (list, str, str, list, bool, dict, str) -> FieldPlot
-        """Create a field plot of stacked layer plot based on a net selections.
-
-        Layers can be used as a filter.
-        Dielectrics will be excluded from the plot.
-        This plot is valid from AEDT 2023 R2 and later in HFSS 3D Layout.
-        It works when a layout components in 3d modeler is used.
-
-        Parameters
-        ----------
-        nets : list, optional
-            List of nets to filter the field plot.
-        quantity : str
-            Name of the quantity to plot.
-        setup : str, optional
-            Name of the setup. The default is ``None``, in which case the ``nominal_adaptive``
-            setup is used. Make sure to build a setup string in the form of
-            ``"SetupName : SetupSweep"``, where ``SetupSweep`` is the sweep name to
-            use in the export or ``LastAdaptive``.
-        layers : list, optional
-            List of layers to plot. For example:
-            ``["Layer1","Layer2"]``. If empty list is provided
-            all layers are considered.
-        intrinsics : dict, str, optional
-            Intrinsic variables required to compute the field before the export.
-            These are typically: frequency, time and phase.
-            It can be provided either as a dictionary or as a string.
-            If it is a dictionary, keys depend on the solution type and can be expressed in lower or camel case as:
-
-            - ``"Freq"`` or ``"Frequency"``.
-            - ``"Time"``.
-            - ``"Phase"``.
-
-            If it is a string, it can either be ``"Freq"`` or ``"Time"`` depending on the solution type.
-            The default is ``None`` in which case the intrinsics value is automatically computed based on the setup.
-        plot_on_surface : bool, optional
-            Whether if the plot has to be on surfaces or inside the objects.
-            It is applicable only to layout components. Default is ``True``.
-        name : str, optional
-            Name of the field plot to create.
-
-        Returns
-        -------
-        :class:``ansys.aedt.core.modules.solutions.FieldPlot`` or bool
-            Plot object.
-
-        References
-        ----------
-        >>> oModule.CreateFieldPlot
-        """
-        intrinsics = self._check_intrinsics(intrinsics, setup=setup)
-        if not setup:
-            setup = self._app.existing_analysis_sweeps[0]
-        if nets is None:
-            nets = []
-        if not (
-            "APhi" in self.post_solution_type and settings.aedt_version >= "2023.2"
-        ) and not self._app.design_type in ["HFSS", "HFSS 3D Layout Design"]:
-            self.logger.error("This method requires AEDT 2023 R2 and Maxwell 3D Transient APhi Formulation.")
-            return False
-        if name and name in list(self.field_plots.keys()):
-            self.logger.info(f"Plot {name} exists. returning the object.")
-            return self.field_plots[name]
-
-        if self._app.design_type in ["HFSS 3D Layout Design"]:
-            lst_faces, new_layers = self._get_3dl_layers_nets(layers, nets, setup, include_dielectrics=False)
-            return self._create_fieldplot(lst_faces, quantity, setup, intrinsics, "FacesList", name)
-        else:
-            _, new_layers = self._get_3d_layers_nets(layers, nets)
-            if plot_on_surface:
-                plot_type = "LayerNetsExtFace"
-            else:
-                plot_type = "LayerNets"
-            return self._create_fieldplot(new_layers, quantity, setup, intrinsics, plot_type, name)
-
-    @pyaedt_function_handler(quantity_name="quantity", setup_name="setup")
-    def create_fieldplot_layers_nets(
-        self, layers_nets, quantity, setup=None, intrinsics=None, plot_on_surface=True, plot_name=None
-    ):
-        # type: (list, str, str, dict, bool, str) -> FieldPlot
-        """Create a field plot of stacked layer plot on specified matrix of layers and nets.
-
-        This plot is valid from AEDT 2023 R2 and later in HFSS 3D Layout
-        and any modeler where a layout component is used.
-
-        Parameters
-        ----------
-        layers_nets : list
-            List of layers and nets to plot. For example:
-            ``[["Layer1", "GND", "PWR"], ["Layer2", "VCC"], ...]``. If ``"no-layer"`` is provided as first argument,
-            all layers are considered. If ``"no-net"`` is provided or the list contains only layer name, all the
-            nets are automatically considered.
-        quantity : str
-            Name of the quantity to plot.
-        setup : str, optional
-            Name of the setup. The default is ``None``, in which case the ``nominal_adaptive``
-            setup is used. Make sure to build a setup string in the form of
-            ``"SetupName : SetupSweep"``, where ``SetupSweep`` is the sweep name to
-            use in the export or ``LastAdaptive``.
-        intrinsics : dict, str, optional
-            Intrinsic variables required to compute the field before the export.
-            These are typically: frequency, time and phase.
-            It can be provided either as a dictionary or as a string.
-            If it is a dictionary, keys depend on the solution type and can be expressed in lower or camel case as:
-
-            - ``"Freq"`` or ``"Frequency"``.
-            - ``"Time"``.
-            - ``"Phase"``.
-
-            If it is a string, it can either be ``"Freq"`` or ``"Time"`` depending on the solution type.
-            The default is ``None`` in which case the intrinsics value is automatically computed based on the setup.
-        plot_on_surface : bool, optional
-            Whether if the plot has to be on surfaces or inside the objects.
-            It is applicable only to layout components. Default is ``True``.
-        plot_name : str, optional
-            Name of the field plot to create.
-
-        Returns
-        -------
-        :class:``ansys.aedt.core.modules.solutions.FieldPlot``
-            Plot object.
-
-        References
-        ----------
-        >>> oModule.CreateFieldPlot
-        """
-        intrinsics = self._check_intrinsics(intrinsics, setup=setup)
-        if not (
-            "APhi" in self.post_solution_type and settings.aedt_version >= "2023.2"
-        ) and not self._app.design_type in ["HFSS", "HFSS 3D Layout Design"]:
-            self.logger.error("This method requires AEDT 2023 R2 and Maxwell 3D Transient APhi Formulation.")
-            return False
-        if intrinsics is None:
-            intrinsics = {}
-        if plot_name and plot_name in list(self.field_plots.keys()):
-            self.logger.info(f"Plot {plot_name} exists. returning the object.")
-            return self.field_plots[plot_name]
-        if self._app.design_type == "HFSS 3D Layout Design":
-            if not setup:
-                setup = self._app.existing_analysis_sweeps[0]
-            lst = []
-            if len(layers_nets) == 0:
-
-                dicts_in = self._get_all_3dl_layers_nets(setup)
-                for _, v in dicts_in.items():
-                    lst.extend(v)
-            for layer in layers_nets:
-                if len(layer) == 1:
-                    dicts_in = self._get_all_3dl_layers_nets(setup)
-                    for v, i in dicts_in.items():
-                        if v.split("/")[1] == layer[0] or v.split("/")[0] == layer[0]:
-                            lst.extend(i)
-                for el in layer[1:]:
-                    el = "<no-net>" if el == "no-net" else el
-                    try:
-                        get_ids = self._odesign.GetGeometryIdsForNetLayerCombination(el, layer[0], setup)
-                    except Exception:  # pragma no cover
-                        get_ids = []
-                    if isinstance(get_ids, (tuple, list)) and len(get_ids) > 2:
-                        lst.extend([int(i) for i in get_ids[2:]])
-            return self._create_fieldplot(lst, quantity, setup, intrinsics, "FacesList", plot_name)
-        else:
-            new_list = []
-            for layer in layers_nets:
-                if "no-layer" in layer[0]:
-                    for v in self._app.modeler.user_defined_components.values():
-                        new_list.extend(
-                            [[i] + layer[1:] for i in v.layout_component.edb_object.stackup.signal_layers.keys()]
-                        )
-                else:
-                    new_list.append(layer)
-            layers_nets = new_list
-            for layer in layers_nets:
-                if len(layer) == 1 or "no-net" in layer[1]:
-                    for v in self._app.modeler.user_defined_components.values():
-                        if layer[0] in v.layout_component.edb_object.stackup.stackup_layers:
-                            layer.extend(list(v.layout_component.edb_object.nets.nets.keys()))
-            if plot_on_surface:
-                plot_type = "LayerNetsExtFace"
-            else:
-                plot_type = "LayerNets"
-            return self._create_fieldplot(layers_nets, quantity, setup, intrinsics, plot_type, plot_name)
 
     @pyaedt_function_handler(
         objlist="assignment", quantityName="quantity", IntrinsincDict="intrinsics", setup_name="setup"
@@ -2127,14 +1553,14 @@ class PostProcessor3D(PostProcessorCommon):
         --------
         >>> from ansys.aedt.core import Q3d
         >>> q3d = Q3d(non_graphical=False)
-        >>> output_file = q3d.post.export_model_picture(full_name=os.path.join(q3d.working_directory, "images1.jpg"))
+        >>> output_file = q3d.post.export_model_picture(full_name=Path(q3d.working_directory) / "images1.jpg")
         """
         if selections:
             selections = self._app.modeler.convert_to_selections(selections, False)
         else:
             selections = ""
         if not full_name:
-            full_name = os.path.join(self._app.working_directory, generate_unique_name(self._app.design_name) + ".jpg")
+            full_name = Path(self._app.working_directory) / (generate_unique_name(self._app.design_name) + ".jpg")
 
         # open the 3D modeler and remove the selection on other objects
         if not self._app.desktop_class.non_graphical:  # pragma: no cover
@@ -2179,64 +1605,18 @@ class PostProcessor3D(PostProcessorCommon):
                 width = 1920
             if height == 0:
                 height = 1080
-            self.oeditor.ExportImage(full_name, width, height)
+            self.oeditor.ExportImage(str(full_name), width, height)
         else:
             if self._app.desktop_class.non_graphical:
                 if width == 0:
                     width = 500
                 if height == 0:
                     height = 500
-            self.oeditor.ExportModelImageToFile(full_name, width, height, arg)
+            self.oeditor.ExportModelImageToFile(str(full_name), width, height, arg)
         return full_name
 
-    @pyaedt_function_handler(expression="expressions", families_dict="sweeps")
-    def get_far_field_data(self, expressions="GainTotal", setup_sweep_name="", domain="Infinite Sphere1", sweeps=None):
-        """Generate far field data using the ``GetSolutionDataPerVariation()`` method.
-
-        This method returns the data ``solData``, ``ThetaVals``,
-        ``PhiVals``, ``ScanPhiVals``, ``ScanThetaVals``, and
-        ``FreqVals``.
-
-        Parameters
-        ----------
-        expressions : str or list, optional
-            One or more formulas to add to the report. The default is ``"GainTotal"``.
-        setup_sweep_name : str, optional
-            Name of the setup for computing the report. The default is ``""``,
-            in which case the nominal sweep is used.
-        domain : str, dict, optional
-            Context type (sweep or time). The default is ``"Infinite Sphere1"``.
-        sweeps : dict, optional
-            Dictionary of variables and values. The default is ``{"Freq": ["All"]}``.
-
-        Returns
-        -------
-        :class:`ansys.aedt.core.modules.solutions.SolutionData`
-
-        References
-        ----------
-        >>> oModule.GetSolutionDataPerVariation
-        """
-        if not isinstance(expressions, list):
-            expressions = [expressions]
-        if not setup_sweep_name:
-            setup_sweep_name = self._app.nominal_adaptive
-        if sweeps is None:
-            sweeps = {"Theta": ["All"], "Phi": ["All"], "Freq": ["All"]}
-        context = ["Context:=", domain]
-        if isinstance(domain, dict):
-            if "Context" in domain.keys() and "SourceContext" in domain.keys():
-                context = ["Context:=", domain["Context"], "Context:=", domain["SourceContext"]]
-
-        solution_data = self.get_solution_data_per_variation(
-            "Far Fields", setup_sweep_name, context, sweeps, expressions
-        )
-        if not solution_data:
-            print("No Data Available. Check inputs")
-            return False
-        return solution_data
-
     @pyaedt_function_handler(obj_list="assignment", export_as_single_objects="export_as_multiple_objects")
+    @min_aedt_version("2021.2")
     def export_model_obj(self, assignment=None, export_path=None, export_as_multiple_objects=False, air_objects=False):
         """Export the model.
 
@@ -2262,8 +1642,14 @@ class PostProcessor3D(PostProcessorCommon):
             assignment = [assignment]
         if self._app._aedt_version < "2021.2":
             raise RuntimeError("Object is supported from AEDT 2021 R2.")  # pragma: no cover
-        if not export_path:
+        if not export_path or isinstance(export_path, Path) and not export_path.name:
             export_path = self._app.working_directory
+        export_path = Path(export_path)
+        export_path = export_path.resolve()
+        export_path = str(export_path)
+
+        if assignment and not isinstance(assignment, (list, tuple)):
+            assignment = [assignment]
         if not assignment:
             self._app.modeler.refresh_all_ids()
             non_model = self._app.modeler.non_model_objects[:]
@@ -2281,8 +1667,8 @@ class PostProcessor3D(PostProcessorCommon):
         if export_as_multiple_objects:
             files_exported = []
             for el in assignment:
-                fname = os.path.join(export_path, f"{el}.obj")
-                self._app.modeler.oeditor.ExportModelMeshToFile(fname, [el])
+                fname = Path(export_path) / f"{el}.obj"
+                self._app.modeler.oeditor.ExportModelMeshToFile(str(fname), [el])
 
                 fname = check_and_download_file(fname)
 
@@ -2296,9 +1682,12 @@ class PostProcessor3D(PostProcessorCommon):
                     files_exported.append([fname, self._app.modeler[el].color, 0.05])
             return files_exported
         else:
-            fname = os.path.join(export_path, "Model_AllObjs_AllMats.obj")
-            self._app.modeler.oeditor.ExportModelMeshToFile(fname, assignment)
-            return [[fname, "aquamarine", 0.3]]
+            if Path(export_path).is_dir():
+                fname = Path(export_path) / "Model_AllObjs_AllMats.obj"
+            else:
+                fname = Path(export_path)
+            self._app.modeler.oeditor.ExportModelMeshToFile(str(fname), assignment)
+            return [[str(fname), "aquamarine", 0.3]]
 
     @pyaedt_function_handler(setup_name="setup")
     def export_mesh_obj(self, setup=None, intrinsics=None, export_air_objects=False, on_surfaces=True):
@@ -2344,9 +1733,9 @@ class PostProcessor3D(PostProcessorCommon):
         >>> hfss = Hfss()
         >>> hfss.analyze()
         >>> # Export report using defaults.
-        >>> hfss.post.export_mesh_obj(setup=None,intrinsics=None)
+        >>> hfss.post.export_mesh_obj(setup=None, intrinsics=None)
         >>> # Export report using arguments.
-        >>> hfss.post.export_mesh_obj(setup="MySetup : LastAdaptive",intrinsics={"w1":"5mm", "l1":"3mm"})
+        >>> hfss.post.export_mesh_obj(setup="MySetup : LastAdaptive", intrinsics={"w1": "5mm", "l1": "3mm"})
         """
         project_path = self._app.working_directory
 
@@ -2374,636 +1763,6 @@ class PostProcessor3D(PostProcessorCommon):
             plot.delete()
             return file_to_add
         return None
-
-    @pyaedt_function_handler()
-    def power_budget(self, units="W", temperature=22, output_type="component"):
-        """Power budget calculation.
-
-        Parameters
-        ----------
-        units : str, optional
-            Output power units. The default is ``"W"``.
-        temperature : float, optional
-            Temperature to calculate the power. The default is ``22``.
-        output_type : str, optional
-            Output data presentation. The default is ``"component"``.
-            The options are ``"component"``, or ``"boundary"``.
-            ``"component"`` returns the power based on each component.
-            ``"boundary"`` returns the power based on each boundary.
-
-        Returns
-        -------
-        dict, float
-            Dictionary with the power introduced on each boundary and total power.
-
-        References
-        ----------
-        >>> oEditor.ChangeProperty
-        """
-        available_bcs = self._app.boundaries
-        power_dict = {}
-        power_dict_obj = {}
-        group_hierarchy = {}
-
-        groups = list(self._app.oeditor.GetChildNames("Groups"))
-        self._app.modeler.add_new_user_defined_component()
-        for g in groups:
-            g1 = self._app.oeditor.GetChildObject(g)
-            if g1:
-                group_hierarchy[g] = list(g1.GetChildNames())
-
-        def multiplier_from_dataset(expression, valuein):
-            multiplier = 0
-            if expression in self._app.design_datasets:
-                dataset = self._app.design_datasets[expression]
-            elif expression in self._app.project_datasets:
-                dataset = self._app.design_datasets[expression]
-            else:
-                return multiplier
-            if valuein >= max(dataset.x):
-                multiplier = dataset.y[-1]
-            elif valuein <= min(dataset.x):
-                multiplier = dataset.y[0]
-            else:
-                start_x = 0
-                start_y = 0
-                end_x = 0
-                end_y = 0
-                for i, y in enumerate(dataset.x):
-                    if y > valuein:
-                        start_x = dataset.x[i - 1]
-                        start_y = dataset.y[i - 1]
-                        end_x = dataset.x[i]
-                        end_y = dataset.y[i]
-                if end_x - start_x == 0:
-                    multiplier = 0
-                else:
-                    multiplier = start_y + (valuein - start_x) * ((end_y - start_y) / (end_x - start_x))
-            return multiplier
-
-        def extract_dataset_info(boundary_obj, units_input="W", boundary="Power"):
-            if boundary == "Power":
-                prop = "Total Power Variation Data"
-            else:
-                prop = "Surface Heat Variation Data"
-                units_input = "irrad_W_per_m2"
-            value_bound = ast.literal_eval(boundary_obj.props[prop]["Variation Value"])[0]
-            expression = ast.literal_eval(boundary_obj.props[prop]["Variation Value"])[1]
-            value = list(decompose_variable_value(value_bound))
-            if isinstance(value[0], str):
-                new_value = self._app[value[0]]
-                value = list(decompose_variable_value(new_value))
-            value = unit_converter(
-                value[0],
-                unit_system=boundary,
-                input_units=value[1],
-                output_units=units_input,
-            )
-            expression = expression.split(",")[0].split("(")[1]
-            return value, expression
-
-        if not available_bcs:
-            self.logger.warning("No boundaries defined")
-            return True
-        for bc_obj in available_bcs:
-            if bc_obj.type == "Solid Block" or bc_obj.type == "Block":
-                n = len(bc_obj.props["Objects"])
-                if "Total Power Variation Data" not in bc_obj.props:
-                    mult = 1
-                    power_value = list(decompose_variable_value(bc_obj.props["Total Power"]))
-                    power_value = unit_converter(
-                        power_value[0], unit_system="Power", input_units=power_value[1], output_units=units
-                    )
-
-                else:
-                    power_value, exp = extract_dataset_info(bc_obj, units_input=units, boundary="Power")
-                    mult = multiplier_from_dataset(exp, temperature)
-
-                for objs in bc_obj.props["Objects"]:
-                    obj_name = self._app.modeler[objs].name
-                    power_dict_obj[obj_name] = power_value * mult
-
-                power_dict[bc_obj.name] = power_value * n * mult
-
-            elif bc_obj.type == "SourceIcepak":
-                if bc_obj.props["Thermal Condition"] == "Total Power":
-                    n = 0
-                    if "Faces" in bc_obj.props:
-                        n += len(bc_obj.props["Faces"])
-                    elif "Objects" in bc_obj.props:
-                        n += len(bc_obj.props["Objects"])
-
-                    if "Total Power Variation Data" not in bc_obj.props:
-                        mult = 1
-                        power_value = list(decompose_variable_value(bc_obj.props["Total Power"]))
-                        power_value = unit_converter(
-                            power_value[0], unit_system="Power", input_units=power_value[1], output_units=units
-                        )
-                    else:
-                        power_value, exp = extract_dataset_info(bc_obj, units_input=units, boundary="Power")
-                        mult = multiplier_from_dataset(exp, temperature)
-
-                    if "Objects" in bc_obj.props:
-                        for objs in bc_obj.props["Objects"]:
-                            obj_name = self._app.modeler[objs].name
-                            power_dict_obj[obj_name] = power_value * mult
-
-                    elif "Faces" in bc_obj.props:
-                        for facs in bc_obj.props["Faces"]:
-                            obj_name = self._app.modeler.oeditor.GetObjectNameByFaceID(facs) + "_FaceID" + str(facs)
-                            power_dict_obj[obj_name] = power_value * mult
-
-                    power_dict[bc_obj.name] = power_value * n * mult
-
-                elif bc_obj.props["Thermal Condition"] == "Surface Flux":
-                    if "Surface Heat Variation Data" not in bc_obj.props:
-                        mult = 1
-                        heat_value = list(decompose_variable_value(bc_obj.props["Surface Heat"]))
-                        if isinstance(heat_value[0], str):
-                            new_value = self._app[heat_value[0]]
-                            heat_value = list(decompose_variable_value(new_value))
-                        heat_value = unit_converter(
-                            heat_value[0],
-                            unit_system="SurfaceHeat",
-                            input_units=heat_value[1],
-                            output_units="irrad_W_per_m2",
-                        )
-                    else:
-                        mult = 1
-                        if bc_obj.props["Surface Heat Variation Data"]["Variation Type"] == "Temp Dep":
-                            heat_value, exp = extract_dataset_info(bc_obj, boundary="SurfaceHeat")
-                            mult = multiplier_from_dataset(exp, temperature)
-                        else:
-                            heat_value = 0
-
-                    power_value = 0.0
-                    if "Faces" in bc_obj.props:
-                        for component in bc_obj.props["Faces"]:
-                            area = self._app.modeler.get_face_area(component)
-                            area = unit_converter(
-                                area,
-                                unit_system="Area",
-                                input_units=self._app.modeler.model_units + "2",
-                                output_units="m2",
-                            )
-                            power_value += heat_value * area * mult
-                    elif "Objects" in bc_obj.props:
-                        for component in bc_obj.props["Objects"]:
-                            object_assigned = self._app.modeler[component]
-                            for f in object_assigned.faces:
-                                area = unit_converter(
-                                    f.area,
-                                    unit_system="Area",
-                                    input_units=self._app.modeler.model_units + "2",
-                                    output_units="m2",
-                                )
-                                power_value += heat_value * area * mult
-
-                    power_value = unit_converter(power_value, unit_system="Power", input_units="W", output_units=units)
-
-                    if "Objects" in bc_obj.props:
-                        for objs in bc_obj.props["Objects"]:
-                            obj_name = self._app.modeler[objs].name
-                            power_dict_obj[obj_name] = power_value
-
-                    elif "Faces" in bc_obj.props:
-                        for facs in bc_obj.props["Faces"]:
-                            obj_name = self._app.modeler.oeditor.GetObjectNameByFaceID(facs) + "_FaceID" + str(facs)
-                            power_dict_obj[obj_name] = power_value
-
-                    power_dict[bc_obj.name] = power_value
-
-            elif bc_obj.type == "Network":
-                nodes = bc_obj.props["Nodes"]
-                power_value = 0
-                for node in nodes:
-                    if "Power" in nodes[node]:
-                        value = nodes[node]["Power"]
-                        value = list(decompose_variable_value(value))
-                        value = unit_converter(value[0], unit_system="Power", input_units=value[1], output_units=units)
-                        power_value += value
-
-                obj_name = self._app.modeler.oeditor.GetObjectNameByFaceID(bc_obj.props["Faces"][0])
-                for facs in bc_obj.props["Faces"]:
-                    obj_name += "_FaceID" + str(facs)
-                power_dict_obj[obj_name] = power_value
-
-                power_dict[bc_obj.name] = power_value
-
-            elif bc_obj.type == "Conducting Plate":
-                n = 0
-                if "Faces" in bc_obj.props:
-                    n += len(bc_obj.props["Faces"])
-                elif "Objects" in bc_obj.props:
-                    n += len(bc_obj.props["Objects"])
-
-                if "Total Power Variation Data" not in bc_obj.props:
-                    mult = 1
-                    power_value = list(decompose_variable_value(bc_obj.props["Total Power"]))
-                    power_value = unit_converter(
-                        power_value[0], unit_system="Power", input_units=power_value[1], output_units=units
-                    )
-
-                else:
-                    power_value, exp = extract_dataset_info(bc_obj, units_input=units, boundary="Power")
-                    mult = multiplier_from_dataset(exp, temperature)
-
-                if "Objects" in bc_obj.props:
-                    for objs in bc_obj.props["Objects"]:
-                        obj_name = self._app.modeler[objs].name
-                        power_dict_obj[obj_name] = power_value * mult
-
-                elif "Faces" in bc_obj.props:
-                    for facs in bc_obj.props["Faces"]:
-                        obj_name = self._app.modeler.oeditor.GetObjectNameByFaceID(facs) + "_FaceID" + str(facs)
-                        power_dict_obj[obj_name] = power_value * mult
-
-                power_dict[bc_obj.name] = power_value * n * mult
-
-            elif bc_obj.type == "Stationary Wall":
-                if bc_obj.props["External Condition"] == "Heat Flux":
-                    mult = 1
-                    heat_value = list(decompose_variable_value(bc_obj.props["Heat Flux"]))
-                    heat_value = unit_converter(
-                        heat_value[0],
-                        unit_system="SurfaceHeat",
-                        input_units=heat_value[1],
-                        output_units="irrad_W_per_m2",
-                    )
-
-                    power_value = 0.0
-                    if "Faces" in bc_obj.props:
-                        for component in bc_obj.props["Faces"]:
-                            area = self._app.modeler.get_face_area(component)
-                            area = unit_converter(
-                                area,
-                                unit_system="Area",
-                                input_units=self._app.modeler.model_units + "2",
-                                output_units="m2",
-                            )
-                            power_value += heat_value * area * mult
-                    if "Objects" in bc_obj.props:
-                        for component in bc_obj.props["Objects"]:
-                            object_assigned = self._app.modeler[component]
-                            for f in object_assigned.faces:
-                                area = unit_converter(
-                                    f.area,
-                                    unit_system="Area",
-                                    input_units=self._app.modeler.model_units + "2",
-                                    output_units="m2",
-                                )
-                                power_value += heat_value * area * mult
-
-                    power_value = unit_converter(power_value, unit_system="Power", input_units="W", output_units=units)
-
-                    if "Objects" in bc_obj.props:
-                        for objs in bc_obj.props["Objects"]:
-                            obj_name = self._app.modeler[objs].name
-                            power_dict_obj[obj_name] = power_value
-
-                    elif "Faces" in bc_obj.props:
-                        for facs in bc_obj.props["Faces"]:
-                            obj_name = self._app.modeler.oeditor.GetObjectNameByFaceID(facs) + "_FaceID" + str(facs)
-                            power_dict_obj[obj_name] = power_value
-
-                    power_dict[bc_obj.name] = power_value
-
-            elif bc_obj.type == "Resistance":
-                n = len(bc_obj.props["Objects"])
-                mult = 1
-                power_value = list(decompose_variable_value(bc_obj.props["Thermal Power"]))
-                power_value = unit_converter(
-                    power_value[0], unit_system="Power", input_units=power_value[1], output_units=units
-                )
-
-                for objs in bc_obj.props["Objects"]:
-                    obj_name = self._app.modeler[objs].name
-                    power_dict_obj[obj_name] = power_value * mult
-
-                power_dict[bc_obj.name] = power_value * n * mult
-
-            elif bc_obj.type == "Blower":
-                power_value = list(decompose_variable_value(bc_obj.props["Blower Power"]))
-                power_value = unit_converter(
-                    power_value[0], unit_system="Power", input_units=power_value[1], output_units=units
-                )
-
-                obj_name = bc_obj.name
-                power_dict_obj[obj_name] = power_value
-
-                power_dict[bc_obj.name] = power_value
-
-        for native_comps in self._app.modeler.user_defined_components.keys():
-            if hasattr(self._app.modeler.user_defined_components[native_comps], "native_properties"):
-                native_key = "NativeComponentDefinitionProvider"
-                if native_key in self._app.modeler.user_defined_components[native_comps].native_properties:
-                    power_key = self._app.modeler.user_defined_components[native_comps].native_properties[native_key]
-                else:
-                    power_key = self._app.modeler.user_defined_components[native_comps].native_properties
-                power_value = None
-                if "Power" in power_key:
-                    power_value = list(decompose_variable_value(power_key["Power"]))
-                elif "HubPower" in power_key:
-                    power_value = list(decompose_variable_value(power_key["HubPower"]))
-
-                if power_value:
-                    power_value = unit_converter(
-                        power_value[0], unit_system="Power", input_units=power_value[1], output_units=units
-                    )
-
-                    power_dict_obj[native_comps] = power_value
-                    power_dict[native_comps] = power_value
-
-        for group in reversed(list(group_hierarchy.keys())):
-            for comp in group_hierarchy[group]:
-                for power_comp in list(power_dict_obj.keys())[:]:
-                    if power_comp.find(comp) >= 0:
-                        if group not in power_dict_obj.keys():
-                            power_dict_obj[group] = 0.0
-                        power_dict_obj[group] += power_dict_obj[power_comp]
-
-        if output_type == "boundary":
-            for comp, value in power_dict.items():
-                if round(value, 3) != 0.0:
-                    self.logger.info(f"The power of {comp} is {str(round(value, 3))} {units}")
-            self.logger.info(f"The total power is {str(round(sum(power_dict.values()), 3))} {units}")
-            return power_dict, sum(power_dict.values())
-
-        elif output_type == "component":  # pragma: no cover
-            for comp, value in power_dict_obj.items():
-                if round(value, 3) != 0.0:
-                    self.logger.info(f"The power of {comp} is {str(round(value, 3))} {units}")
-            self.logger.info(f"The total power is {str(round(sum(power_dict_obj.values()), 3))} {units}")
-            return power_dict_obj, sum(power_dict_obj.values())
-
-        else:  # pragma: no cover
-            for comp, value in power_dict.items():
-                if round(value, 3) != 0.0:
-                    self.logger.info(f"The power of {comp} is {str(round(value, 3))} {units}")
-            self.logger.info(f"The total power is {str(round(sum(power_dict.values()), 3))} {units}")
-            for comp, value in power_dict_obj.items():
-                if round(value, 3) != 0.0:
-                    self.logger.info(f"The power of {comp} is {str(round(value, 3))} {units}")
-            self.logger.info(f"The total power is {str(round(sum(power_dict_obj.values()), 3))} {units}")
-            return power_dict_obj, sum(power_dict_obj.values()), power_dict, sum(power_dict.values())
-
-    @pyaedt_function_handler()
-    def create_creeping_plane_visual_ray_tracing(
-        self,
-        max_frequency="1GHz",
-        ray_density=1,
-        sample_density=10,
-        ray_cutoff=40,
-        irregular_surface_tolerance=50,
-        incident_theta=0,
-        incident_phi=0,
-        is_vertical_polarization=False,
-    ):
-        """Create a Creeping Wave Plane Wave Visual Ray Tracing and return the class object.
-
-        Parameters
-        ----------
-        max_frequency : str, optional
-            Maximum Frequency. Default is ``"1GHz"``.
-        ray_density : int, optional
-            Ray Density. Default is ``2``.
-        sample_density : int, optional
-            Sample density. Default is ``10``.
-        ray_cutoff : int, optional
-            Ray Cutoff number. Default is ``40``.
-        irregular_surface_tolerance : int, optional
-            Irregular Surface Tolerance value. Default is ``50``.
-        incident_theta : str, optional
-            Incident plane wave theta. Default is ``"0deg"``.
-        incident_phi : str, optional
-            Incident plane wave phi. Default is ``"0deg"``.
-        is_vertical_polarization : bool, optional
-            Whether if enable or Vertical Polarization or not. Default is ``False``.
-
-        Returns
-        -------
-        :class:` from ansys.aedt.core.modules.solutions.VRTFieldPlot`
-        """
-        vrt = VRTFieldPlot(self, is_creeping_wave=True)
-        vrt.max_frequency = max_frequency
-        vrt.sample_density = sample_density
-        vrt.ray_density = ray_density
-        vrt.ray_cutoff = ray_cutoff
-        vrt.irregular_surface_tolerance = irregular_surface_tolerance
-        vrt.is_plane_wave = True
-        vrt.incident_theta = incident_theta
-        vrt.incident_phi = incident_phi
-        vrt.vertical_polarization = is_vertical_polarization
-        vrt.create()
-        return vrt
-
-    @pyaedt_function_handler()
-    def create_creeping_point_visual_ray_tracing(
-        self,
-        max_frequency="1GHz",
-        ray_density=1,
-        sample_density=10,
-        ray_cutoff=40,
-        irregular_surface_tolerance=50,
-        custom_location=None,
-    ):
-        """Create a Creeping Wave Point Source Visual Ray Tracing and return the class object.
-
-        Parameters
-        ----------
-        max_frequency : str, optional
-            Maximum Frequency. Default is ``"1GHz"``.
-        ray_density : int, optional
-            Ray Density. Default is ``2``.
-        sample_density : int, optional
-            Sample density. Default is ``10``.
-        ray_cutoff : int, optional
-            Ray Cutoff number. Default is ``40``.
-        irregular_surface_tolerance : int, optional
-            Irregular Surface Tolerance value. Default is ``50``.
-        custom_location : list, optional
-            List of x, y,z position of point source. Default is ``None``.
-
-        Returns
-        -------
-        :class:` from ansys.aedt.core.modules.solutions.VRTFieldPlot`
-        """
-        if custom_location is None:
-            custom_location = [0, 0, 0]
-        vrt = VRTFieldPlot(self, is_creeping_wave=True)
-        vrt.max_frequency = max_frequency
-        vrt.sample_density = sample_density
-        vrt.ray_density = ray_density
-        vrt.ray_cutoff = ray_cutoff
-        vrt.irregular_surface_tolerance = irregular_surface_tolerance
-        vrt.is_plane_wave = False
-        vrt.custom_location = custom_location
-        vrt.create()
-        return vrt
-
-    @pyaedt_function_handler()
-    def create_sbr_plane_visual_ray_tracing(
-        self,
-        max_frequency="1GHz",
-        ray_density=2,
-        number_of_bounces=5,
-        multi_bounce=False,
-        mbrd_max_sub_division=2,
-        shoot_utd=False,
-        incident_theta=0,
-        incident_phi=0,
-        is_vertical_polarization=False,
-        shoot_filter_type="All Rays",
-        ray_index_start=0,
-        ray_index_stop=1,
-        ray_index_step=1,
-        ray_box=None,
-    ):
-        """Create an SBR Plane Wave Visual Ray Tracing and return the class object.
-
-        Parameters
-        ----------
-        max_frequency : str, optional
-            Maximum Frequency. Default is ``"1GHz"``.
-        ray_density : int, optional
-            Ray Density. Default is ``2``.
-        number_of_bounces : int, optional
-            Maximum number of bounces. Default is ``5``.
-        multi_bounce : bool, optional
-            Whether if enable or not Multi-Bounce ray density control. Default is ``False``.
-        mbrd_max_sub_division : int, optional
-            Maximum number of MBRD subdivisions. Default is ``2``.
-        shoot_utd : bool, optional
-            Whether if enable or UTD Rays shooting or not. Default is ``False``.
-        incident_theta : str, optional
-            Incident plane wave theta. Default is ``"0deg"``.
-        incident_phi : str, optional
-            Incident plane wave phi. Default is ``"0deg"``.
-        is_vertical_polarization : bool, optional
-            Whether if enable or Vertical Polarization or not. Default is ``False``.
-        shoot_filter_type : str, optional
-            Shooter Type. Default is ``"All Rays"``. Options are  ``"Rays by index"``,  ``"Rays in box"``.
-        ray_index_start : int, optional
-            Ray index start. Valid only if ``"Rays by index"`` is chosen.  Default is ``0``.
-        ray_index_stop : int, optional
-            Ray index stop. Valid only if ``"Rays by index"`` is chosen.  Default is ``1``.
-        ray_index_step : int, optional
-            Ray index step. Valid only if ``"Rays by index"`` is chosen.  Default is ``1``.
-        ray_box : int or str optional
-            Ray box name or id. Valid only if ``"Rays by box"`` is chosen.  Default is ``None``.
-
-        Returns
-        -------
-        :class:` from ansys.aedt.core.modules.solutions.VRTFieldPlot`
-        """
-        vrt = VRTFieldPlot(self, is_creeping_wave=False)
-        vrt.max_frequency = max_frequency
-        vrt.ray_density = ray_density
-        vrt.number_of_bounces = number_of_bounces
-        vrt.multi_bounce_ray_density_control = multi_bounce
-        vrt.mbrd_max_subdivision = mbrd_max_sub_division
-        vrt.shoot_utd_rays = shoot_utd
-        vrt.shoot_type = shoot_filter_type
-        vrt.is_plane_wave = True
-        vrt.incident_theta = incident_theta
-        vrt.incident_phi = incident_phi
-        vrt.vertical_polarization = is_vertical_polarization
-        vrt.start_index = ray_index_start
-        vrt.stop_index = ray_index_stop
-        vrt.step_index = ray_index_step
-        vrt.ray_box = ray_box
-        vrt.create()
-        return vrt
-
-    @pyaedt_function_handler()
-    def create_sbr_point_visual_ray_tracing(
-        self,
-        max_frequency="1GHz",
-        ray_density=2,
-        number_of_bounces=5,
-        multi_bounce=False,
-        mbrd_max_sub_division=2,
-        shoot_utd=False,
-        custom_location=None,
-        shoot_filter_type="All Rays",
-        ray_index_start=0,
-        ray_index_stop=1,
-        ray_index_step=1,
-        ray_box=None,
-    ):
-        """Create an SBR Point Source Visual Ray Tracing and return the class object.
-
-        Parameters
-        ----------
-        max_frequency : str, optional
-            Maximum Frequency. Default is ``1GHz``.
-        ray_density : int, optional
-            Ray Density. Default is ``2``.
-        number_of_bounces : int, optional
-            Maximum number of bounces. Default is ``5``.
-        multi_bounce : bool, optional
-            Whether if enable or not Multi-Bounce ray density control. Default is ``False``.
-        mbrd_max_sub_division : int, optional
-            Maximum number of MBRD subdivisions. Default is ``2``.
-        shoot_utd : bool, optional
-            Whether if enable or UTD Rays shooting or not. Default is ``False``.
-        custom_location : list, optional
-            List of x, y,z position of point source. Default is ``None``.
-        shoot_filter_type : str, optional
-            Shooter Type. Default is ``"All Rays"``. Options are ``Rays by index``, ``Rays in box``.
-        ray_index_start : int, optional
-            Ray index start. Valid only if ``Rays by index`` is chosen.  Default is ``0``.
-        ray_index_stop : int, optional
-            Ray index stop. Valid only if ``Rays by index`` is chosen.  Default is ``1``.
-        ray_index_step : int, optional
-            Ray index step. Valid only if ``Rays by index`` is chosen.  Default is ``1``.
-        ray_box : int or str optional
-            Ray box name or id. Valid only if ``Rays by box`` is chosen.  Default is ``None``.
-
-        Returns
-        -------
-        :class:` from ansys.aedt.core.modules.solutions.VRTFieldPlot`
-
-        """
-        if custom_location is None:
-            custom_location = [0, 0, 0]
-        vrt = VRTFieldPlot(self, is_creeping_wave=False)
-        vrt.max_frequency = max_frequency
-        vrt.ray_density = ray_density
-        vrt.number_of_bounces = number_of_bounces
-        vrt.multi_bounce_ray_density_control = multi_bounce
-        vrt.mbrd_max_subdivision = mbrd_max_sub_division
-        vrt.shoot_utd_rays = shoot_utd
-        vrt.shoot_type = shoot_filter_type
-        vrt.is_plane_wave = False
-        vrt.custom_location = custom_location
-        vrt.start_index = ray_index_start
-        vrt.stop_index = ray_index_stop
-        vrt.step_index = ray_index_step
-        vrt.ray_box = ray_box
-        vrt.create()
-        return vrt
-
-    @pyaedt_function_handler()
-    def set_tuning_offset(self, setup, offsets):
-        """Set derivative variable to a specific offset value.
-
-        Parameters
-        ----------
-        setup : str
-            Setup name.
-        offsets : dict
-            Dictionary containing the variable name and it's offset value.
-
-        Returns
-        -------
-        bool
-        """
-        setup_obj = self._app.get_setup(setup)
-        if setup_obj and "set_tuning_offset" in dir(setup_obj):
-            return setup_obj.set_tuning_offset(offsets)
-        self.logger.error("Tuning offset applies only to solved setup with derivatives enabled.")
-        return False
 
     @pyaedt_function_handler()
     def nb_display(self, show_axis=True, show_grid=True, show_ruler=True):
@@ -3040,7 +1799,7 @@ class PostProcessor3D(PostProcessorCommon):
             warnings.warn("The Ipython package is missing and must be installed.")
 
     @pyaedt_function_handler()
-    def get_efields_data(self, setup_sweep_name="", ff_setup="Infinite Sphere1", freq="All"):
+    def get_efields_data(self, setup_sweep_name="", ff_setup="Infinite Sphere1"):
         """Compute Etheta and EPhi.
 
         .. warning::
@@ -3054,8 +1813,6 @@ class PostProcessor3D(PostProcessorCommon):
             which case the nominal adaptive is applied.
         ff_setup : str, optional
             Far field setup. The default is ``"Infinite Sphere1"``.
-        freq : str, optional
-            The default is ``"All"``.
 
         Returns
         -------
@@ -3149,6 +1906,8 @@ class PostProcessor3D(PostProcessorCommon):
         :class:`ansys.aedt.core.generic.plot.ModelPlotter`
             Model Object.
         """
+        from ansys.aedt.core.visualization.plot.pyvista import ModelPlotter
+
         if self._app._aedt_version < "2021.2":
             raise RuntimeError("Object is supported from AEDT 2021 R2.")  # pragma: no cover
 
@@ -3381,7 +2140,7 @@ class PostProcessor3D(PostProcessorCommon):
             model.range_min = scale_min
             model.range_max = scale_max
         if project_path:
-            model.plot(os.path.join(project_path, plot_name + "." + image_format))
+            model.plot(Path(project_path) / (plot_name + "." + image_format))
         elif show:
             model.plot()
         return model
@@ -3411,6 +2170,7 @@ class PostProcessor3D(PostProcessorCommon):
         show_legend=True,
         filter_objects=None,
         plot_as_separate_objects=True,
+        file_format="case",
     ):
         """Create a field plot  using Python PyVista and export to an image file (JPG or PNG).
 
@@ -3476,6 +2236,8 @@ class PostProcessor3D(PostProcessorCommon):
             Objects list for filtering the ``CutPlane`` plots.
         plot_as_separate_objects : bool, optional
             Plot each object separately. It may require more time to export from AEDT.
+        file_format : str, optional
+            File format for the exported image. The default is ``"case"``.
 
         Returns
         -------
@@ -3520,6 +2282,7 @@ class PostProcessor3D(PostProcessorCommon):
             show_bounding=show_bounding,
             show_legend=show_legend,
             plot_as_separate_objects=plot_as_separate_objects,
+            file_format=file_format,
         )
         if not keep_plot_after_generation:
             plotf.delete()
@@ -3550,6 +2313,7 @@ class PostProcessor3D(PostProcessorCommon):
         show_bounding=False,
         show_legend=True,
         filter_objects=None,
+        file_format="case",
     ):
         """Create an animated field plot using Python PyVista and export to a gif file.
 
@@ -3614,12 +2378,16 @@ class PostProcessor3D(PostProcessorCommon):
         filter_objects : list, optional
             Objects list for filtering the ``CutPlane`` plots.
             The default is ``None`` in which case an empty list is passed.
+        file_format : str, optional
+            File format for the exported image. The default is ``"case"``.
 
         Returns
         -------
         :class:`ansys.aedt.core.generic.plot.ModelPlotter`
             Model Object.
         """
+        if isinstance(export_path, Path):
+            export_path = str(export_path)
         intrinsics = self._check_intrinsics(intrinsics, setup=setup)
         if variations is None:
             variations = ["0deg"]
@@ -3649,7 +2417,7 @@ class PostProcessor3D(PostProcessorCommon):
                     assignment, quantity, setup, intrinsics, filter_objects=filter_objects
                 )
             if plotf:
-                file_to_add = self.export_field_plot(plotf.name, export_path, plotf.name + str(v))
+                file_to_add = self.export_field_plot(plotf.name, export_path, plotf.name + str(v), file_format)
                 if file_to_add:
                     fields_to_add.append(file_to_add)
                 plotf.delete()
@@ -3666,7 +2434,7 @@ class PostProcessor3D(PostProcessorCommon):
         if fields_to_add:
             model.add_frames_from_file(fields_to_add, log_scale=log_scale)
         if export_gif:
-            model.gif_file = os.path.join(self._app.working_directory, self._app.project_name + ".gif")
+            model.gif_file = Path(self._app.working_directory) / (self._app.project_name + ".gif")
         if view != "isometric" and view in ["xy", "xz", "yz"]:
             model.camera_position = view
         elif view != "isometric":
@@ -3678,7 +2446,7 @@ class PostProcessor3D(PostProcessorCommon):
         if zoom:
             model.zoom = zoom
         if show or export_gif:
-            model.animate()
+            model.animate(show=show)
         return model
 
     @pyaedt_function_handler(plotname="plot_name", variation_list="variations")
@@ -3712,7 +2480,7 @@ class PostProcessor3D(PostProcessorCommon):
         variations : list, optional
             List of variation values with units. The default is
             ``["0deg"]``.
-        project_path : str, optional
+        project_path : str or :class:'pathlib.Path', optional
             Path for the export. The default is ``""``, in which case the file is exported
             to the working directory.
         export_gif : bool, optional
@@ -3731,6 +2499,9 @@ class PostProcessor3D(PostProcessorCommon):
         :class:`ansys.aedt.core.generic.plot.ModelPlotter`
             Model Object.
         """
+        if isinstance(project_path, Path):
+            project_path = str(project_path)
+
         if not plot_folder:
             self.ofieldsreporter.UpdateAllFieldsPlots()
         else:
@@ -3769,10 +2540,10 @@ class PostProcessor3D(PostProcessorCommon):
         if fields_to_add:
             model.add_frames_from_file(fields_to_add)
         if export_gif:
-            model.gif_file = os.path.join(self._app.working_directory, self._app.project_name + ".gif")
+            model.gif_file = Path(self._app.working_directory) / (self._app.project_name + ".gif")
 
         if show or export_gif:
-            model.animate()
+            model.animate(show=show)
         return model
 
     @pyaedt_function_handler()
@@ -3865,7 +2636,7 @@ class PostProcessor3D(PostProcessorCommon):
         Returns
         -------
         """
-        if isinstance(frames, str) and os.path.exists(frames):
+        if isinstance(frames, str) and Path(frames).exists():
             with open_file(frames, "r") as f:
                 lines = f.read()
                 temp_list = lines.splitlines()
@@ -3901,4 +2672,88 @@ class PostProcessor3D(PostProcessorCommon):
         scene.gif_file = gif_path  # This GIF file may be a bit slower so it can be speed it up a bit
         scene.convert_fields_in_db = convert_fields_in_db
         scene.log_multiplier = log_multiplier
-        scene.animate()
+        scene.animate(show=show)
+
+    def get_field_extremum(
+        self,
+        assignment: str,
+        max_min: Literal["Max", "Min"],
+        location: Literal["Surface", "Volume"],
+        field: str,
+        setup: Optional[str] = None,
+        intrinsics: Optional[Dict[str, str]] = None,
+    ) -> Tuple[Tuple[float, float, float], float]:
+        """
+        Calculates the position and value of the field maximum or minimum.
+
+        Parameters
+        ----------
+            assignment : str
+                The name of the object to calculate the extremum for.
+            max_min : Literal["Max", "Min"]
+                "Max" for maximum, "Min" for minimum.
+            location : Literal["Surface", "Volume"]
+                "Surface" for surface, "Volume" for volume.
+            field : str:
+                Name of the field.
+            intrinsics : Optional[dict[str, str]]
+                Time at which to retrieve results if setup is transient. Default is `None`.
+            setup : Optional[str]
+                The name of the setup to use. If `None`, the first available setup is used. Default is `None`.
+
+        Returns
+        -------
+            Tuple[Tuple[float, float, float], float]
+            A tuple containing:
+
+              - A tuple of three floats representing the (x, y, z) coordinates of the maximum point.
+              - A float representing the value associated with the maximum point.
+        """
+        if assignment not in self._app.modeler.object_names:
+            raise ValueError(f"Object '{assignment}' does not exist.")
+
+        max_min = max_min.capitalize()
+        location = location.capitalize()
+
+        position = []
+        for d in ["X", "Y", "Z"]:
+            self.fields_calculator.delete_expression("__pyaedt_internal_MaxMinPos")
+            xpr = self.fields_calculator.add_expression(
+                {
+                    "name": "__pyaedt_internal_MaxMinPos",
+                    "design_type": [self._app.design_type],
+                    "fields_type": ["Fields"],
+                    "primary_sweep": "",
+                    "assignment": assignment,
+                    "assignment_type": ["Sheet", "Solid"],
+                    "operations": [
+                        f"Fundamental_Quantity('{field}')"
+                        f"Enter{location}('{assignment}')"
+                        f"Operation('{location}Value')"
+                        f"Operation('{max_min}Pos')"
+                        f"Operation('Scalar{d}')"
+                    ],
+                },
+                assignment,
+            )
+            position.append(
+                unit_converter(
+                    float(self.fields_calculator.evaluate(xpr, setup, intrinsics)),
+                    unit_system="Length",
+                    input_units="meter",
+                    output_units=self._app.units.length,
+                )
+            )
+            self.fields_calculator.delete_expression(xpr)
+        position = tuple(position)
+
+        value = self.get_scalar_field_value(
+            field,
+            scalar_function=f"{max_min}imum",
+            solution=setup,
+            intrinsics=intrinsics,
+            object_name=assignment,
+            object_type=location.casefold(),
+        )
+
+        return position, value

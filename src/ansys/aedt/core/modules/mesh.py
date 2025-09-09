@@ -29,12 +29,12 @@ import shutil
 
 from ansys.aedt.core.application.design_solutions import model_names
 from ansys.aedt.core.generic.data_handlers import _dict2arg
-from ansys.aedt.core.generic.errors import MethodNotSupportedError
-from ansys.aedt.core.generic.general_methods import generate_unique_name
+from ansys.aedt.core.generic.file_utils import generate_unique_name
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.generic.general_methods import settings
-from ansys.aedt.core.generic.load_aedt_file import load_keyword_in_aedt_file
-from ansys.aedt.core.generic.numbers import _units_assignment
+from ansys.aedt.core.generic.numbers_utils import _units_assignment
+from ansys.aedt.core.internal.errors import MethodNotSupportedError
+from ansys.aedt.core.internal.load_aedt_file import load_keyword_in_aedt_file
 from ansys.aedt.core.modeler.cad.elements_3d import BinaryTreeNode
 from ansys.aedt.core.modeler.cad.elements_3d import EdgePrimitive
 from ansys.aedt.core.modeler.cad.elements_3d import FacePrimitive
@@ -334,7 +334,6 @@ class MeshOperation(BinaryTreeNode):
             ``True`` when successful, ``False`` when failed.
 
         """
-
         out = []
 
         if "Faces" in self.props:
@@ -426,8 +425,8 @@ class Mesh(object):
 
     >>> from ansys.aedt.core import Hfss
     >>> hfss = Hfss()
-    >>> cylinder = hfss.modeler.create_cylinder(0,[0, 0, 0],3,20,0)
-    >>> model_resolution = hfss.mesh.assign_model_resolution(cylinder,1e-4,"ModelRes1")
+    >>> cylinder = hfss.modeler.create_cylinder(0, [0, 0, 0], 3, 20, 0)
+    >>> model_resolution = hfss.mesh.assign_model_resolution(cylinder, 1e-4, "ModelRes1")
     """
 
     def __init__(self, app):
@@ -464,11 +463,10 @@ class Mesh(object):
 
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> cylinder = hfss.modeler.create_cylinder(0,[0, 0, 0],3,20,0)
-        >>> mr1 = hfss.mesh.assign_model_resolution(cylinder,1e-4,"ModelRes1")
+        >>> cylinder = hfss.modeler.create_cylinder(0, [0, 0, 0], 3, 20, 0)
+        >>> mr1 = hfss.mesh.assign_model_resolution(cylinder, 1e-4, "ModelRes1")
         >>> mr2 = hfss.mesh[mr1.name]
         """
-
         if part_id in self.meshoperation_names:
             mesh_op_selected = [mesh_op for mesh_op in self.meshoperations if mesh_op.name == part_id]
             return mesh_op_selected[0]
@@ -489,8 +487,8 @@ class Mesh(object):
 
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> o = hfss.modeler.create_cylinder(0,[0, 0, 0],3,20,0)
-        >>> mr1 = hfss.mesh.assign_model_resolution(o,1e-4,"ModelRes1")
+        >>> o = hfss.modeler.create_cylinder(0, [0, 0, 0], 3, 20, 0)
+        >>> mr1 = hfss.mesh.assign_model_resolution(o, 1e-4, "ModelRes1")
         >>> mesh_operations_list = hfss.mesh.meshoperations
         """
         if self._meshoperations is None:
@@ -500,7 +498,6 @@ class Mesh(object):
     @pyaedt_function_handler()
     def _refresh_mesh_operations(self):
         """Refresh all mesh operations."""
-
         self._meshoperations = self._get_design_mesh_operations()
         return len(self.meshoperations)
 
@@ -519,9 +516,9 @@ class Mesh(object):
 
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> o = hfss.modeler.create_cylinder(0,[0, 0, 0],3,20,0)
-        >>> mr1 = hfss.mesh.assign_model_resolution(o,1e-4,"ModelRes1")
-        >>> mr2 = hfss.mesh.assign_model_resolution(o,1e-2,"ModelRes2")
+        >>> o = hfss.modeler.create_cylinder(0, [0, 0, 0], 3, 20, 0)
+        >>> mr1 = hfss.mesh.assign_model_resolution(o, 1e-4, "ModelRes1")
+        >>> mr2 = hfss.mesh.assign_model_resolution(o, 1e-2, "ModelRes2")
         >>> mesh_operations_names = hfss.mesh.meshoperation_names
         """
         if self._app._is_object_oriented_enabled():
@@ -627,8 +624,8 @@ class Mesh(object):
 
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> o = hfss.modeler.create_cylinder(0,[0, 0, 0],3,20,0)
-        >>> surface = hfss.mesh.assign_surface_mesh(o.id,3,"Surface")
+        >>> o = hfss.modeler.create_cylinder(0, [0, 0, 0], 3, 20, 0)
+        >>> surface = hfss.mesh.assign_surface_mesh(o.id, 3, "Surface")
         """
         assignment = self._modeler.convert_to_selections(assignment, True)
         if name:
@@ -691,8 +688,8 @@ class Mesh(object):
 
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> o = hfss.modeler.create_cylinder(0,[0, 0, 0],3,20,0)
-        >>> surface = hfss.mesh.assign_surface_mesh_manual(o.id,1e-6,aspect_ratio=3,name="Surface_Manual")
+        >>> o = hfss.modeler.create_cylinder(0, [0, 0, 0], 3, 20, 0)
+        >>> surface = hfss.mesh.assign_surface_mesh_manual(o.id, 1e-6, aspect_ratio=3, name="Surface_Manual")
         """
         assignment = self._modeler.convert_to_selections(assignment, True)
         if name:
@@ -767,8 +764,8 @@ class Mesh(object):
 
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> o = hfss.modeler.create_cylinder(0,[0, 0, 0],3,20,0)
-        >>> surface = hfss.mesh.assign_model_resolution(o,1e-4,"ModelRes1")
+        >>> o = hfss.modeler.create_cylinder(0, [0, 0, 0], 3, 20, 0)
+        >>> surface = hfss.mesh.assign_model_resolution(o, 1e-4, "ModelRes1")
         """
         assignment = self._modeler.convert_to_selections(assignment, True)
         if name:
@@ -1056,7 +1053,6 @@ class Mesh(object):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Maxwell3d
         >>> m3d = Maxwell3d()
         >>> m3d.create_setup(setupname="Setup1")

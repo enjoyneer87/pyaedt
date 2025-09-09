@@ -30,8 +30,8 @@ This module provides all functionalities for creating and editing the mesh in th
 """
 
 from ansys.aedt.core.generic.data_handlers import _dict2arg
+from ansys.aedt.core.generic.file_utils import generate_unique_name
 from ansys.aedt.core.generic.general_methods import PropsManager
-from ansys.aedt.core.generic.general_methods import generate_unique_name
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.modules.mesh import MeshProps
 
@@ -302,8 +302,8 @@ class Mesh3d(object):
             return
         if isinstance(layer, list) and isinstance(net, list):
             assignment = dict({"MeshEntityInfo": []})
-            for l, n in zip(layer, net):
-                meshbody = dict({"Id": -1, "Nam": "", "Layer": l, "Net": n, "OrigNet": n})
+            for lay, n in zip(layer, net):
+                meshbody = dict({"Id": -1, "Nam": "", "Layer": lay, "Net": n, "OrigNet": n})
                 assignment["MeshEntityInfo"].append(
                     dict({"IsFcSel": False, "EntID": -1, "FcIDs": [], "MeshBody": meshbody, "BBox": []})
                 )

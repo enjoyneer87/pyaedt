@@ -7,20 +7,6 @@ This page describes the breaking changes expected in the upcoming major version 
 These changes include the deprecation of certain function argument names and the restructuring
 of the codebase.
 
-Python version deprecation
---------------------------
-
-Please be advised that, with the release of version 1.0 of PyAEDT, support for Python versions
-3.8 and 3.9 is no longer provided. This decision has been made in order to align with the
-Python Scientific Community's best practices and for security reasons. It is important to note
-that many packages within the Scientific Python Community have dropped support for these Python
-versions a while ago. Therefore, dropping support for these versions is also a step towards
-maintaining compatibility, enhancing security and taking full advantage of these scientific
-packages.
-
-For further information on this topic, see
-`SPEC 0000 <https://scientific-python.org/specs/spec-0000>`_ .
-
 Deprecation of function argument names
 --------------------------------------
 
@@ -126,7 +112,7 @@ The following table list the name changes with the old and new paths:
 +----------------------------------------------------------------+--------------------------------------------------------------------------+
 | pyaedt\\generic\\DataHandlers.py                               | src\\ansys\\aedt\\core\\generic\\data_handlers.py                        |
 +----------------------------------------------------------------+--------------------------------------------------------------------------+
-| pyaedt\\generic\\LoadAEDTFile.py                               | src\\ansys\\aedt\\core\\generic\\load_aedt_file.py                       |
+| pyaedt\\generic\\LoadAEDTFile.py                               | src\\ansys\\aedt\\core\\internal\\load_aedt_file.py                      |
 +----------------------------------------------------------------+--------------------------------------------------------------------------+
 | pyaedt\\modeler\\modeler2d.py                                  | src\\ansys\\aedt\\core\\modeler\\modeler_2d.py                           |
 +----------------------------------------------------------------+--------------------------------------------------------------------------+

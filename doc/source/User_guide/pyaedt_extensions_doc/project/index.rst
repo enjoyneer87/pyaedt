@@ -11,7 +11,7 @@ Project extensions
             Import a Nastran or STL file in any 3D modeler application.
 
    .. grid-item-card:: Configure Layout
-            :link: configure_edb
+            :link: configure_layout
             :link-type: doc
             :margin: 2 2 0 0
 
@@ -30,3 +30,16 @@ Project extensions
 
             Lear how to convert projects from 2022R2 to newer versions.
 
+   .. grid-item-card:: Point cloud generator
+            :link: point_cloud_generator
+            :link-type: doc
+            :margin: 2 2 0 0
+
+            Generate and import points list from a geometry.
+
+   .. grid-item-card:: Via design
+            :link: via_design
+            :link-type: doc
+            :margin: 2 2 0 0
+
+            Generate a parameterized via design.

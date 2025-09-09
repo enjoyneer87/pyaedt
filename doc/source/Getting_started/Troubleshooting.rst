@@ -53,7 +53,39 @@ Another option to install PyAEDT from the wheelhouse is to download the followin
 :download:`PyAEDT Installer Python file <../Resources/pyaedt_installer_from_aedt.py>`.
 Run this script directly from AEDT and pass the wheelhouse file name as an argument.
 
+.. _panel_error:
 
+Error installing PyAEDT panels in AEDT
+--------------------------------------
+
+Sometimes, the PyAEDT installer may fail when adding panels to AEDT.
+
+This is typically caused by insufficient write permissions to your PersonalLib directory.
+
+.. image:: ../Resources/toolkit_manager_3.png
+  :width: 800
+  :alt: PyAEDT toolkit manager 3
+
+If the virtual environment was successfully created, you can first activate it, and then you manually register the toolkit panels using the following command:
+
+.. code::
+
+     from ansys.aedt.core.extensions.installer.pyaedt_installer import add_pyaedt_to_aedt
+     add_pyaedt_to_aedt(“your_aedt_version", r“path_to_personalib")
+
+If the issue persists, try installing all required dependencies, including the optional components, by running the following command:
+
+.. code:: bash
+
+    pip install pyaedt[all]
+
+If you need to restart the setup from scratch, follow these steps:
+
+- Delete the virtual environment folder. On Windows: located in your APPDATA directory. On Linux: located in your HOME directory.
+
+- Delete the Toolkits directory in your PersonalLib folder.
+
+These steps remove any existing configurations and allow you to perform a clean installation.
 
 
 Run PyAEDT
@@ -111,6 +143,7 @@ commands from the PyAEDT client. This configuration
 supports multiple sessions of AEDT running on a single server
 and listening on the same port.
 
+
 Check the gRPC interface
 ------------------------
 The native Electronics Desktop API can be used to launch
@@ -122,12 +155,11 @@ variables have been defined correctly.
 .. code:: python
 
     import sys
-    sys.path.append(r"ANSYSEM_ROOT251\PythonFiles\DesktopPlugin")
+    sys.path.append(r"ANSYSEM_ROOT252\PythonFiles\DesktopPlugin")
     import ScriptEnv
     print(dir())
     ScriptEnv.Initialize("", False, "", 50051)
     print(dir())
-
 
 
 Failure connecting to the gRPC server

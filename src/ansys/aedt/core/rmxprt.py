@@ -159,7 +159,7 @@ class Rmxprt(FieldAnalysisRMxprt):
         Version of AEDT to use. The default is ``None``, in which case
         the active setup is used or the latest installed version is
         used.
-        Examples of input values are ``251``, ``25.1``, ``2025.1``, ``"2025.1"``.
+        Examples of input values are ``252``, ``25.2``, ``2025.2``, ``"2025.2"``.
     non_graphical : bool, optional
         Whether to launch AEDT in non-graphical mode. The default
         is ``False``, in which case AEDT is launched in graphical mode.
@@ -206,7 +206,7 @@ class Rmxprt(FieldAnalysisRMxprt):
     Create an instance of RMxprt and link to a design named
     ``"designname"`` in a project named ``"projectname"``.
 
-    >>> app = Rmxprt(projectname,designame)
+    >>> app = Rmxprt(projectname, designame)
 
     Create an instance of RMxprt and open the specified project,
     which is ``"myfile.aedt"``.
@@ -309,10 +309,9 @@ class Rmxprt(FieldAnalysisRMxprt):
 
         Examples
         --------
-
         >>> from ansys.aedt.core import Hfss
         >>> hfss = Hfss()
-        >>> hfss.create_setup(name="Setup1",setup_type="HFSSDriven",Frequency="10GHz")
+        >>> hfss.create_setup(name="Setup1", setup_type="HFSSDriven", Frequency="10GHz")
 
         """
         if setup_type is None:
@@ -360,7 +359,7 @@ class Rmxprt(FieldAnalysisRMxprt):
         jsonalize(self.rotor.properties, new_dict)
         jsonalize(self.circuit.properties, new_dict)
         jsonalize(self.shaft.properties, new_dict)
-        from ansys.aedt.core.generic.general_methods import write_configuration_file
+        from ansys.aedt.core.generic.file_utils import write_configuration_file
 
         write_configuration_file(new_dict, output_file)
         return output_file
@@ -379,8 +378,7 @@ class Rmxprt(FieldAnalysisRMxprt):
         bool
             ``True`` when successful, ``False`` when failed.
         """
-
-        from ansys.aedt.core.generic.general_methods import read_configuration_file
+        from ansys.aedt.core.generic.file_utils import read_configuration_file
 
         new_dict = read_configuration_file(input_file)
         for k, v in new_dict.items():

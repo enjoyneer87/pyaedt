@@ -29,8 +29,9 @@ import secrets
 import string
 import unicodedata
 
+from ansys.aedt.core.generic.file_utils import read_json
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.general_methods import read_json
+from ansys.aedt.core.generic.numbers_utils import Quantity
 from ansys.aedt.core.modeler.cad.elements_3d import EdgePrimitive
 from ansys.aedt.core.modeler.cad.elements_3d import FacePrimitive
 from ansys.aedt.core.modeler.cad.elements_3d import VertexPrimitive
@@ -153,7 +154,9 @@ def _dict2arg(d, arg_out):
                 arg = ["NAME:" + k]
                 _dict2arg(el, arg)
                 arg_out.append(arg)
-
+        elif isinstance(v, Quantity):
+            arg_out.append(k + ":=")
+            arg_out.append(str(v))
         else:
             arg_out.append(k + ":=")
             if type(v) is EdgePrimitive or type(v) is FacePrimitive or type(v) is VertexPrimitive:
@@ -291,24 +294,13 @@ def unique_string_list(element_list, only_string=True):
     -------
 
     """
-    if element_list:
-        if isinstance(element_list, list):
-            element_list = set(element_list)
-        elif isinstance(element_list, str):
-            element_list = [element_list]
-        else:
-            error_message = "Invalid list data"
-            try:
-                error_message += f" {element_list}"
-            except Exception:
-                pass
-            raise Exception(error_message)
+    if isinstance(element_list, str):
+        element_list = [element_list]
 
-        if only_string:
-            non_string_entries = [x for x in element_list if not isinstance(x, str)]
-            assert not non_string_entries, f"Invalid list entries {non_string_entries} are not a string!"
+    if only_string and any(not isinstance(x, str) for x in element_list):
+        raise TypeError("Invalid list entries, some elements are not of type string.")
 
-    return element_list
+    return list(set(element_list))
 
 
 @pyaedt_function_handler()
@@ -327,10 +319,10 @@ def string_list(element_list):
     list
 
     """
+    if not isinstance(element_list, (str, list)):
+        raise TypeError("Input must be a list or a string")
     if isinstance(element_list, str):
         element_list = [element_list]
-    else:
-        assert isinstance(element_list, str), "Input must be a list or a string"
     return element_list
 
 
@@ -432,38 +424,37 @@ def from_rkm(code):
     Examples
     --------
     >>> from ansys.aedt.core.generic.data_handlers import from_rkm
-    >>> from_rkm('R47')
+    >>> from_rkm("R47")
     '0.47'
 
-    >>> from_rkm('4R7')
+    >>> from_rkm("4R7")
     '4.7'
 
-    >>> from_rkm('470R')
+    >>> from_rkm("470R")
     '470'
 
-    >>> from_rkm('4K7')
+    >>> from_rkm("4K7")
     '4.7k'
 
-    >>> from_rkm('47K')
+    >>> from_rkm("47K")
     '47k'
 
-    >>> from_rkm('47K3')
+    >>> from_rkm("47K3")
     '47.3k'
 
-    >>> from_rkm('470K')
+    >>> from_rkm("470K")
     '470k'
 
-    >>> from_rkm('4M7')
+    >>> from_rkm("4M7")
     '4.7M'
 
     """
-
     # Matches RKM codes that start with a digit.
     # fd_pattern = r'([0-9]+)([LREkKMGTFmuµUnNpP]+)([0-9]*)'
-    fd_pattern = f'([0-9]+)([{"".join(RKM_MAPS.keys())}]+)([0-9]*)'
+    fd_pattern = f"([0-9]+)([{''.join(RKM_MAPS.keys())}]+)([0-9]*)"
     # matches rkm codes that end with a digit
     # ld_pattern = r'([0-9]*)([LREkKMGTFmuµUnNpP]+)([0-9]+)'
-    ld_pattern = f'([0-9]*)([{"".join(RKM_MAPS.keys())}]+)([0-9]+)'
+    ld_pattern = f"([0-9]*)([{''.join(RKM_MAPS.keys())}]+)([0-9]+)"
 
     fd_regex = re.compile(fd_pattern, re.I)
     ld_regex = re.compile(ld_pattern, re.I)
@@ -495,7 +486,7 @@ def to_aedt(code):
     str
 
     """
-    pattern = f'([{"".join(AEDT_MAPS.keys())}]{"{1}"})'
+    pattern = f"([{''.join(AEDT_MAPS.keys())}]{'{1}'})"
     regex = re.compile(pattern, re.I)
     return_code = regex.sub(lambda m: AEDT_MAPS.get(m.group(), m.group()), code)
     return return_code
@@ -610,7 +601,7 @@ def float_units(val_str, units=""):
     -------
 
     """
-    if not units in unit_val:
+    if units not in unit_val:
         raise Exception("Specified unit string " + units + " not known!")
 
     loc = re.search("[a-zA-Z]", val_str)
@@ -627,7 +618,6 @@ def float_units(val_str, units=""):
 
 @pyaedt_function_handler()
 def normalize_string_format(text):
-
     equivalence_table = {
         "$": "S",
         "€": "E",

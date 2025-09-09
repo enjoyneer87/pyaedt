@@ -27,7 +27,7 @@ import re
 from ansys.aedt.core.generic.constants import SI_UNITS
 from ansys.aedt.core.generic.constants import unit_system
 from ansys.aedt.core.generic.data_handlers import _dict2arg
-from ansys.aedt.core.generic.general_methods import generate_unique_name
+from ansys.aedt.core.generic.file_utils import generate_unique_name
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 
 quantities_dict_1 = {  # pragma: no cover
@@ -298,7 +298,7 @@ class Monitor:
         --------
         Create two temperature monitor at the points ``[0, 0, 0]`` and ``[1, 1, 1]``.
 
-        >>> icepak.monitor.assign_point_monitor([[0,0,0], [1, 1, 1]], monitor_name="monitor1")
+        >>> icepak.monitor.assign_point_monitor([[0, 0, 0], [1, 1, 1]], monitor_name="monitor1")
         ['monitor1', 'monitor2']
 
         """
@@ -422,7 +422,8 @@ class Monitor:
         --------
         Create a rectangle named ``"Surface1"`` and assign a temperature monitor to that surface.
 
-        >>> surface = icepak.modeler.create_rectangle(icepak.PLANE.XY,[0, 0, 0],[10, 20],name="Surface1")
+        >>> from ansys.aedt.core.generic.constants import Plane
+        >>> surface = icepak.modeler.create_rectangle(Plane.XY, [0, 0, 0], [10, 20], name="Surface1")
         >>> icepak.assign_surface_monitor("Surface1", monitor_name="monitor")
         'monitor'
         """
@@ -522,7 +523,7 @@ class Monitor:
         --------
         Create a box named ``"BlockBox1"`` and assign a temperature monitor point to that object.
 
-        >>> box = icepak.modeler.create_box([1, 1, 1],[3, 3, 3],"BlockBox1","copper")
+        >>> box = icepak.modeler.create_box([1, 1, 1], [3, 3, 3], "BlockBox1", "copper")
         >>> icepak.assign_point_monitor(box.name, monitor_name="monitor2")
         "'monitor2'
         """

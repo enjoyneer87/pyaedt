@@ -27,27 +27,13 @@ import math
 import os
 import warnings
 
+import numpy as np
+
 from ansys.aedt.core.generic.constants import AEDT_UNITS
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
+from ansys.aedt.core.internal.checks import graphics_required
 from ansys.aedt.core.visualization.plot.pyvista import CommonPlotter
 from ansys.aedt.core.visualization.plot.pyvista import ObjClass
-
-try:
-    import numpy as np
-except ImportError:
-    warnings.warn(
-        "The NumPy module is required to run some functionalities of PostProcess.\n"
-        "Install with \n\npip install numpy"
-    )
-try:
-    import pyvista as pv
-
-    pyvista_available = True
-except ImportError:
-    warnings.warn(
-        "The PyVista module is required to run some functionalities of PostProcess.\n"
-        "Install with \n\npip install pyvista\n\nRequires CPython."
-    )
 
 
 class HDMPlotter(CommonPlotter):
@@ -63,6 +49,10 @@ class HDMPlotter(CommonPlotter):
         self._bundle = None
         self.show_as_standalone = True
         self.units = "meter"
+        self.jupyter_backend = None
+        use_html_backend = os.environ.get("PYANSYS_VISUALIZER_HTML_BACKEND", "false").lower() == "true"
+        if use_html_backend:
+            self.jupyter_backend = "html"
 
     @property
     def hdm_data(self):
@@ -131,11 +121,12 @@ class HDMPlotter(CommonPlotter):
             points.extend(new_track_seg)
             add_ray_segment(2, track.first_bounce)
 
-        lines = [[len(l), *l] for l in lines]
+        lines = [[len(line), *line] for line in lines]
         lines = [len(lines), *(chain.from_iterable(lines))]
         return points, lines, depths
 
     @pyaedt_function_handler()
+    @graphics_required
     def plot_rays(self, snapshot_path=None):
         """Plot Rays read from an ``hdm`` file.
 
@@ -154,7 +145,10 @@ class HDMPlotter(CommonPlotter):
         This method is intended to be an example of the usage that can be made of hdm file.
 
         """
+        import pyvista as pv
+
         warnings.warn("This method is intended to be an example of the usage that can be made of hdm file.")
+
         if snapshot_path:
             self.pv = pv.Plotter(notebook=self.is_notebook, off_screen=True, window_size=self.windows_size)
         else:
@@ -180,9 +174,9 @@ class HDMPlotter(CommonPlotter):
             scalar_bar_args={"n_colors": 256, "n_labels": 0, "title": "Depth"},
         )
         if snapshot_path:
-            self.pv.show(screenshot=snapshot_path, full_screen=True)
+            self.pv.show(screenshot=snapshot_path, full_screen=True, jupyter_backend=self.jupyter_backend)
         else:
-            self.pv.show(auto_close=False)
+            self.pv.show(auto_close=False, jupyter_backend=self.jupyter_backend)
         return self.pv
 
     @pyaedt_function_handler()
@@ -199,6 +193,7 @@ class HDMPlotter(CommonPlotter):
         return bounces
 
     @pyaedt_function_handler()
+    @graphics_required
     def plot_first_bounce_currents(self, snapshot_path=None):
         """Plot First bounce of currents read from an ``hdm`` file.
 
@@ -211,7 +206,10 @@ class HDMPlotter(CommonPlotter):
         -------
         :class:`pyvista.Plotter`
         """
+        import pyvista as pv
+
         warnings.warn("This method is intended to be an example of the usage that can be made of hdm file.")
+
         currents = self._first_bounce_currents()
         points = []
         faces = []
@@ -237,12 +235,15 @@ class HDMPlotter(CommonPlotter):
         fb = pv.PolyData(points, faces=faces)
         self.pv.add_mesh(fb, scalars=colors)
         if snapshot_path:
-            self.pv.show(screenshot=snapshot_path, full_screen=True)
+            self.pv.show(screenshot=snapshot_path, full_screen=True, jupyter_backend=self.jupyter_backend)
         else:
-            self.pv.show(auto_close=False)
+            self.pv.show(auto_close=False, jupyter_backend=self.jupyter_backend)
 
     @pyaedt_function_handler()
+    @graphics_required
     def _add_objects(self):
+        import pyvista as pv
+
         if self._objects:
             for cad in self._objects:
                 if not cad._cached_polydata:

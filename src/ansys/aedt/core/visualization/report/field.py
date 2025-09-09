@@ -28,6 +28,7 @@ This module contains these classes: `AntennaParameters`, `Fields`, `NearField`, 
 This module provides all functionalities for creating and editing reports.
 
 """
+
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
 from ansys.aedt.core.visualization.report.common import CommonReport
 from ansys.aedt.core.visualization.report.standard import Standard
@@ -98,6 +99,8 @@ class Fields(CommonReport):
         ctxt = []
         if self.polyline:
             ctxt = ["Context:=", self.polyline, "PointCount:=", self.point_number]
+        elif self._app.solution_type in ["Q3D Extractor", "2D Extractor"] and self.matrix:
+            ctxt = self.matrix
         return ctxt
 
 

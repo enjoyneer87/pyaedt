@@ -26,13 +26,14 @@ import os
 import tempfile
 import time
 
-from ansys.aedt.core import Hfss3dLayout
-from ansys.aedt.core import Maxwell3d
-from ansys.aedt.core.generic.general_methods import generate_unique_name
-from ansys.aedt.core.generic.general_methods import is_linux
-from ansys.aedt.core.visualization.plot.pdf import AnsysReport
 import pytest
 
+from ansys.aedt.core import Hfss
+from ansys.aedt.core import Hfss3dLayout
+from ansys.aedt.core import Maxwell3d
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.general_methods import is_linux
+from ansys.aedt.core.visualization.plot.pdf import AnsysReport
 from tests import TESTS_GENERAL_PATH
 from tests.system.general.conftest import config
 
@@ -49,13 +50,29 @@ else:
 @pytest.fixture(scope="class")
 def aedtapp(add_app):
     app = add_app(project_name=test_project_name, application=Hfss3dLayout)
-    return app
+    yield app
+    app.close_project(app.project_name)
 
 
 @pytest.fixture(scope="class")
 def hfss3dl(add_app):
     app = add_app(project_name=diff_proj_name, application=Hfss3dLayout, subfolder=test_subfolder)
-    return app
+    yield app
+    app.close_project(app.project_name)
+
+
+@pytest.fixture(scope="class")
+def maxwell(add_app):
+    app = add_app(project_name=test_post, application=Maxwell3d, subfolder=test_subfolder)
+    yield app
+    app.close_project(app.project_name)
+
+
+@pytest.fixture(scope="class")
+def hfss(add_app):
+    app = add_app(project_name=test_post, application=Hfss, subfolder=test_subfolder)
+    yield app
+    app.close_project(app.project_name)
 
 
 @pytest.fixture(scope="class", autouse=True)
@@ -278,7 +295,6 @@ class TestClass:
         assert pad1.create()
 
     def test_11_create_via(self):
-        tmp = self.aedtapp.modeler.vias
         cvia = self.aedtapp.modeler.create_via("PlanarEMVia", x=1.1, y=0, name="port_via")
         via = cvia.name
         assert isinstance(via, str)
@@ -334,7 +350,7 @@ class TestClass:
         assert port_wave
         assert self.aedtapp.delete_port(port_wave.name)
         assert self.aedtapp.create_edge_port("line1", 3, False)
-        assert len(self.aedtapp.excitations) > 0
+        assert len(self.aedtapp.excitation_names) > 0
         time_domain = os.path.join(TESTS_GENERAL_PATH, "example_models", test_subfolder, "Sinusoidal.csv")
         assert self.aedtapp.boundaries[0].properties["Magnitude"] == "1V"
         assert self.aedtapp.edit_source_from_file(
@@ -364,7 +380,7 @@ class TestClass:
     def test_14_create_setup(self):
         setup_name = "RFBoardSetup"
         setup = self.aedtapp.create_setup(name=setup_name)
-        assert setup.name == self.aedtapp.existing_analysis_setups[0]
+        assert setup.name == self.aedtapp.setup_names[0]
         assert setup.solver_type == "HFSS"
 
     def test_15_edit_setup(self):
@@ -377,9 +393,9 @@ class TestClass:
         assert sweep1 == sweep
         sweep2 = setup2.get_sweep()
         assert sweep2 == sweep1
-        setup2.props["AdaptiveSettings"]["SingleFrequencyDataList"]["AdaptiveFrequencyData"][
-            "AdaptiveFrequency"
-        ] = "1GHz"
+        setup2.props["AdaptiveSettings"]["SingleFrequencyDataList"]["AdaptiveFrequencyData"]["AdaptiveFrequency"] = (
+            "1GHz"
+        )
         setup2.props["AdaptiveSettings"]["SingleFrequencyDataList"]["AdaptiveFrequencyData"]["MaxPasses"] = 23
         setup2.props["AdvancedSettings"]["OrderBasis"] = 2
         setup2.props["PercentRefinementPerPass"] = 17
@@ -437,7 +453,7 @@ class TestClass:
 
     def test_17_get_setup(self):
         self.aedtapp.save_project()
-        setup4 = self.aedtapp.get_setup(self.aedtapp.existing_analysis_setups[0])
+        setup4 = self.aedtapp.get_setup(self.aedtapp.setup_names[0])
         setup4.props["PercentRefinementPerPass"] = 37
         setup4.props["AdaptiveSettings"]["SingleFrequencyDataList"]["AdaptiveFrequencyData"]["MaxPasses"] = 44
         assert setup4.update()
@@ -564,9 +580,9 @@ class TestClass:
     def test_18d_delete_setup(self):
         setup_name = "SetupToDelete"
         setuptd = self.aedtapp.create_setup(name=setup_name)
-        assert setuptd.name in self.aedtapp.existing_analysis_setups
+        assert setuptd.name in self.aedtapp.setup_names
         self.aedtapp.delete_setup(setup_name)
-        assert setuptd.name not in self.aedtapp.existing_analysis_setups
+        assert setuptd.name not in self.aedtapp.setup_names
 
     def test_19a_validate(self):
         assert self.aedtapp.validate_full_design()
@@ -579,7 +595,7 @@ class TestClass:
         file_fullname = os.path.join(self.local_scratch.path, filename)
         file_fullname2 = os.path.join(self.local_scratch.path, filename2)
         file_fullname3 = os.path.join(self.local_scratch.path, filename3)
-        setup = self.aedtapp.get_setup(self.aedtapp.existing_analysis_setups[0])
+        setup = self.aedtapp.get_setup(self.aedtapp.setup_names[0])
         assert setup.export_to_hfss(output_file=file_fullname)
         if not is_linux:
             # TODO: EDB failing in Linux
@@ -590,13 +606,13 @@ class TestClass:
     def test_19e_export_to_q3d(self):
         filename = "export_to_q3d_test"
         file_fullname = os.path.join(self.local_scratch.path, filename)
-        setup = self.aedtapp.get_setup(self.aedtapp.existing_analysis_setups[0])
+        setup = self.aedtapp.get_setup(self.aedtapp.setup_names[0])
         assert setup.export_to_q3d(file_fullname)
 
     def test_19f_export_to_q3d(self):
         filename = "export_to_q3d_non_unite_test"
         file_fullname = os.path.join(self.local_scratch.path, filename)
-        setup = self.aedtapp.get_setup(self.aedtapp.existing_analysis_setups[0])
+        setup = self.aedtapp.get_setup(self.aedtapp.setup_names[0])
         assert setup.export_to_q3d(file_fullname, keep_net_name=True, unite=False)
 
     def test_21_variables(self):
@@ -624,11 +640,8 @@ class TestClass:
         port.properties["Magnitude"] = "5V"
         assert port.properties["Magnitude"] == "5V"
 
-    def test_28_create_scattering(self):
-        assert self.aedtapp.create_scattering()
-
     def test_29_duplicate_material(self):
-        material = self.aedtapp.materials.add_material("FirstMaterial")
+        self.aedtapp.materials.add_material("FirstMaterial")
         new_material = self.aedtapp.materials.duplicate_material("FirstMaterial", "SecondMaterial")
         assert new_material.name == "SecondMaterial"
 
@@ -680,8 +693,8 @@ class TestClass:
 
     def test_35a_export_layout(self):
         self.aedtapp.insert_design("export_layout")
-        s1 = self.aedtapp.modeler.layers.add_layer(layer="Top")
-        n2 = self.aedtapp.modeler.create_rectangle("Top", [0, 0], [6, 8], 3, 2, "myrectangle")
+        self.aedtapp.modeler.layers.add_layer(layer="Top")
+        self.aedtapp.modeler.create_rectangle("Top", [0, 0], [6, 8], 3, 2, "myrectangle")
         output = self.aedtapp.export_3d_model()
         time_out = 0
         while time_out < 10:
@@ -749,67 +762,64 @@ class TestClass:
     @pytest.mark.skipif(not config["use_grpc"], reason="Not running in COM mode")
     @pytest.mark.skipif(config["desktopVersion"] < "2023.2", reason="Working only from 2023 R2")
     @pytest.mark.skipif(is_linux, reason="PyEDB is failing in Linux.")
-    def test_42_post_processing(self, add_app):
-        test_post1 = add_app(project_name=test_post, application=Maxwell3d, subfolder=test_subfolder)
-        field_plot_layers = test_post1.post.create_fieldplot_layers(
+    def test_42_post_processing(self, maxwell, hfss):
+        field_plot_layers = maxwell.post.create_fieldplot_layers(
             [],
             "Mag_H",
             intrinsics={"Time": "1ms"},
             nets=["GND", "V3P3_S5"],
         )
         assert field_plot_layers
-        assert test_post1.post.create_fieldplot_layers(
+        assert maxwell.post.create_fieldplot_layers(
             [], "Mag_H", intrinsics={"Time": "1ms"}, nets=["GND", "V3P3_S5"], name=field_plot_layers.name
         )
 
-        assert test_post1.post.create_fieldplot_layers(
+        assert maxwell.post.create_fieldplot_layers(
             ["UNNAMED_006"],
             "Mag_H",
             intrinsics={"Time": "1ms"},
         )
-        assert test_post1.post.create_fieldplot_layers_nets(
+        assert maxwell.post.create_fieldplot_layers_nets(
             [["TOP", "GND", "V3P3_S5"], ["PWR", "V3P3_S5"]],
             "Mag_Volume_Force_Density",
             intrinsics={"Time": "1ms"},
             plot_name="Test_Layers",
         )
-        assert test_post1.post.create_fieldplot_layers_nets(
+        assert maxwell.post.create_fieldplot_layers_nets(
             [["TOP", "GND", "V3P3_S5"], ["PWR", "V3P3_S5"]],
             "Mag_Volume_Force_Density",
             intrinsics={"Time": "1ms"},
             plot_name="Test_Layers",
         )
-        assert test_post1.post.create_fieldplot_layers_nets(
+        assert maxwell.post.create_fieldplot_layers_nets(
             [["TOP"], ["PWR", "V3P3_S5"]],
             "Mag_Volume_Force_Density",
             intrinsics={"Time": "1ms"},
             plot_name="Test_Layers2",
         )
-        assert test_post1.post.create_fieldplot_layers_nets(
+        assert maxwell.post.create_fieldplot_layers_nets(
             [["no-layer", "GND"]],
             "Mag_Volume_Force_Density",
             intrinsics={"Time": "1ms"},
             plot_name="Test_Layers3",
         )
-        test_post2 = add_app(project_name=test_post1.project_name, just_open=True)
-        assert test_post2.post.create_fieldplot_layers_nets(
+        assert hfss.post.create_fieldplot_layers_nets(
             [["TOP", "GND", "V3P3_S5"], ["PWR", "V3P3_S5"]],
             "Mag_E",
             intrinsics={"Freq": "1GHz", "Phase": "0deg"},
             plot_name="Test_Layers4",
         )
-        assert test_post2.post.create_fieldplot_layers(
+        assert hfss.post.create_fieldplot_layers(
             ["TOP"],
             "Mag_E",
             intrinsics={"Freq": "1GHz", "Phase": "0deg"},
         )
-        assert test_post2.post.create_fieldplot_layers(
+        assert hfss.post.create_fieldplot_layers(
             ["TOP", "UNNAMED_004"],
             "Mag_E",
             intrinsics={"Freq": "1GHz", "Phase": "0deg"},
             nets=["GND", "V3P3_S5"],
         )
-        self.aedtapp.close_project(test_post2.project_name)
 
     @pytest.mark.skipif(config["desktopVersion"] < "2023.2", reason="Working only from 2023 R2")
     @pytest.mark.skipif(is_linux, reason="PyEDB failing in Linux")
@@ -864,8 +874,6 @@ class TestClass:
 
         assert pl2
         assert pl2.export_image_from_aedtplt(tempfile.gettempdir())
-
-        self.aedtapp.close_project(test.project_name)
 
     @pytest.mark.skipif(is_linux, reason="Bug on linux")
     def test_90_set_differential_pairs(self, hfss3dl):
@@ -953,7 +961,39 @@ class TestClass:
     def test_98_geom_check(self):
         assert self.aedtapp.modeler.geometry_check_and_fix_all()
 
+    @pytest.mark.skipif(is_linux, reason="Not Supported on Linux.")
     def test_99_export_on_completion(self, add_app, local_scratch):
-        aedtapp = add_app(project_name="test_99", application=Hfss3dLayout)
+        aedtapp = add_app(project_name="test_export_on_completion", application=Hfss3dLayout)
         assert aedtapp.export_touchstone_on_completion()
-        assert aedtapp.export_touchstone_on_completion(export=True, output_dir=self.local_scratch.path)
+        assert aedtapp.export_touchstone_on_completion(export=True, output_dir=local_scratch.path)
+
+    def test_create_coordinate_system(self, add_app):
+        aedtapp = add_app(project_name="test_coordinate_system", application=Hfss3dLayout)
+        cs1 = aedtapp.modeler.create_coordinate_system()
+
+        assert len(cs1.origin) == 2
+        assert len(aedtapp.modeler.coordinate_systems) == 1
+        assert cs1.name in aedtapp.modeler.coordinate_system_names
+        assert cs1["Location"] == "0 ,0"
+        assert cs1.delete()
+
+        cs2 = aedtapp.modeler.create_coordinate_system(name="new", origin=["1mm", "2mm"])
+        assert len(aedtapp.modeler.coordinate_systems) == 1
+        cs_location = cs2.get_property_value("Location")
+        assert cs_location == "1 ,2"
+        cs2.origin = ["2mm", "2mm"]
+        cs_location = cs2.get_property_value("Location")
+        assert cs_location == "2 ,2"
+
+        cs2.name = "new2"
+        assert cs2.name in aedtapp.modeler.coordinate_system_names
+
+        with pytest.raises(AttributeError):
+            aedtapp.modeler.create_coordinate_system(name=cs2.name)
+
+        # If CS is renamed, it can not be deleted
+        assert not cs2.delete()
+
+    def test_create_scattering(self, hfss3dl):
+        hfss3dl.create_setup()
+        assert hfss3dl.create_scattering()

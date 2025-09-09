@@ -30,11 +30,12 @@ from pathlib import Path
 from ansys.aedt.core.application.analysis_twin_builder import AnalysisTwinBuilder
 from ansys.aedt.core.application.variables import Variable
 from ansys.aedt.core.generic.constants import unit_converter
-from ansys.aedt.core.generic.general_methods import generate_unique_name
-from ansys.aedt.core.generic.general_methods import open_file
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
-from ansys.aedt.core.generic.numbers import decompose_variable_value
-from ansys.aedt.core.generic.numbers import is_number
+from ansys.aedt.core.generic.numbers_utils import decompose_variable_value
+from ansys.aedt.core.generic.numbers_utils import is_number
+from ansys.aedt.core.internal.checks import min_aedt_version
 
 
 class TwinBuilder(AnalysisTwinBuilder, object):
@@ -62,7 +63,7 @@ class TwinBuilder(AnalysisTwinBuilder, object):
         Version of AEDT to use. The default is ``None``, in which
         case the active setup or latest installed version is
         used.
-        Examples of input values are ``251``, ``25.1``, ``2025.1``, ``"2025.1"``.
+        Examples of input values are ``252``, ``25.2``, ``2025.2``, ``"2025.2"``.
     non_graphical : bool, optional
         Whether to launch AEDT in non-graphical mode. The default
         is ``False``, in which case AEDT is launched in graphical mode.
@@ -368,8 +369,8 @@ class TwinBuilder(AnalysisTwinBuilder, object):
         Examples
         --------
         >>> from ansys.aedt.core import TwinBuilder
-        >>> tb = TwinBuilder(version="2025.1")
-        >>> tb.create_subsheet('subsheet', 'parentdesign')
+        >>> tb = TwinBuilder(version="2025.2")
+        >>> tb.create_subsheet("subsheet", "parentdesign")
         """
         try:
             if design_name not in self.design_list:
@@ -450,7 +451,6 @@ class TwinBuilder(AnalysisTwinBuilder, object):
 
         Examples
         --------
-
         Create an instance of Twin Builder.
 
         >>> from ansys.aedt.core import TwinBuilder
@@ -458,8 +458,9 @@ class TwinBuilder(AnalysisTwinBuilder, object):
 
         Add a Q2D dynamic link component.
 
-        >>> tb.add_q3d_dynamic_component("Q2D_ArmouredCableExample", "2D_Extractor_Cable", "MySetupAuto", "sweep1",
-        ...                              "Original","100mm")
+        >>> tb.add_q3d_dynamic_component(
+        ...     "Q2D_ArmouredCableExample", "2D_Extractor_Cable", "MySetupAuto", "sweep1", "Original", "100mm"
+        ... )
         >>> tb.release_desktop()
         """
         dkp = self.desktop_class
@@ -513,7 +514,7 @@ class TwinBuilder(AnalysisTwinBuilder, object):
             if not is_number(value) and not unit:
                 raise TypeError("Model depth must be provided as a string with value and unit.")
             design_type = "Q2D"
-            signal_list = [k for k, v in app.excitation_objects.items() if v.type == "SignalLine"]
+            signal_list = [k for k, v in app.design_excitations.items() if v.type == "SignalLine"]
             for signal in signal_list:
                 port_info_list_A.append("OnePortInfo:=")
                 port_info_list_B.append("OnePortInfo:=")
@@ -577,7 +578,7 @@ class TwinBuilder(AnalysisTwinBuilder, object):
                 "filename:=",
                 str(project_path),
                 "numberofports:=",
-                2 * len(app.excitations),
+                2 * len(app.excitation_names),
                 "Is3D:=",
                 is_3d,
                 "IsWBLink:=",
@@ -644,6 +645,7 @@ class TwinBuilder(AnalysisTwinBuilder, object):
             raise ValueError("Error in creating the component.")
 
     @pyaedt_function_handler()
+    @min_aedt_version("2025.1")
     def add_excitation_model(
         self,
         project,
@@ -711,22 +713,18 @@ class TwinBuilder(AnalysisTwinBuilder, object):
         ----------
         >>> oComponentManager.AddExcitationModel
 
-        Example
-        -------
+        Examples
+        --------
         >>> from ansys.aedt.core import TwinBuilder
-        >>> tb = TwinBuilder(specified_version="2025.1")
+        >>> tb = TwinBuilder(specified_version="2025.2")
         >>> maxwell_app = tb.desktop_class[[project_name, "my_maxwell_design"]]
         >>> excitations = {}
         >>> for e in maxwell_app.excitations_by_type["Winding Group"]:
-        ...    excitations[e.name] = ["20", True, e.props["Type"], False]
+        ...     excitations[e.name] = ["20", True, e.props["Type"], False]
         >>> comp = tb.add_excitation_model(project=project_name, design="my_maxwell_design", excitations=excitations)
         >>> tb.release_desktop(False, False)
         """
         dkp = self.desktop_class
-        if dkp.aedt_version_id < "2025.1":  # pragma: no cover
-            self.logger.error("This method only works for AEDT 2025 R1 and later.")
-            return False
-
         project_selection = 0
         if Path(project).is_file():
             project_path = project

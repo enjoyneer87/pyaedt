@@ -7,8 +7,6 @@ with the use of a simple script.
 
 This script is compatible with AEDT files, as well as A3DCOMP files (including encrypted 3DComponents).
 
-You can access the extension from the icon created on the **Automation** tab using the Extension Manager.
-
 The following image shows the extension user interface:
 
 .. image:: ../../../_static/extensions/kernel_convert_ui.png
@@ -28,7 +26,7 @@ an AEDT file, or a folder containing a variety of files of both types
    conversion to be successful for all files.
 
 Last but not least, for every file in the folder, a new file is generated in the path provided, that contains the
-design converted to the latest version, and its name indicating the initial file version (i.e.test_aedt_2025.1)
+design converted to the latest version, and its name indicating the initial file version (for example test_aedt_2025.2)
 Furthermore, for every conversion, a CSV file is created, with a name pointing to the converted design name,
 containing any violations that occurred during the conversion, and that need **manual** fixing by the user.
 
@@ -39,17 +37,17 @@ the generated 2025R1 version (with the Parasolid Kernel) files.
   :width: 800
   :alt: Generated Files During Kernel Conversion
 
-You can also launch the extension user interface from the terminal:
+You can launch the extension user interface from the terminal, you can find the script in the PyAEDT installation:
 
 .. code::
 
-   python.exe path/to/pyaedt/workflows/project/kernel_converter.py
+   python.exe path/to/pyaedt/extensions/project/kernel_converter.py
 
 Finally, this code shows how you can run the extension directly from a Python script:
 
 .. code:: python
 
-    from ansys.aedt.core.workflows.project.kernel_converter import main
+    from ansys.aedt.core.extensions.project.kernel_converter import main
 
     main(test_args = {"password": "my_pwd",
                     "application": "HFSS",

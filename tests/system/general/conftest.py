@@ -42,6 +42,7 @@ directory as this module. An example of the contents of local_config.json
 
 """
 
+import gc
 import json
 import os
 import random
@@ -51,9 +52,16 @@ import sys
 import tempfile
 import time
 
-from ansys.aedt.core.generic.settings import settings
 import pytest
 
+from ansys.aedt.core import Edb
+from ansys.aedt.core import Hfss
+from ansys.aedt.core.aedt_logger import pyaedt_logger
+from ansys.aedt.core.desktop import Desktop
+from ansys.aedt.core.generic.file_utils import generate_unique_name
+from ansys.aedt.core.generic.settings import settings
+from ansys.aedt.core.internal.desktop_sessions import _desktop_sessions
+from ansys.aedt.core.internal.filesystem import Scratch
 from tests import TESTS_GENERAL_PATH
 
 settings.enable_local_log_file = False
@@ -65,21 +73,13 @@ settings.enable_desktop_logs = False
 settings.desktop_launch_timeout = 180
 settings.release_on_exception = False
 settings.wait_for_license = True
-
-from ansys.aedt.core import Edb
-from ansys.aedt.core import Hfss
-from ansys.aedt.core.aedt_logger import pyaedt_logger
-from ansys.aedt.core.desktop import Desktop
-from ansys.aedt.core.desktop import _delete_objects
-from ansys.aedt.core.generic.desktop_sessions import _desktop_sessions
-from ansys.aedt.core.generic.filesystem import Scratch
-from ansys.aedt.core.generic.general_methods import generate_unique_name
+settings.enable_pandas_output = True
 
 local_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(local_path)
 
 # Initialize default desktop configuration
-default_version = "2025.1"
+default_version = "2025.2"
 
 config = {
     "desktopVersion": default_version,
@@ -124,6 +124,16 @@ def generate_random_string(length):
 def generate_random_ident():
     ident = "-" + generate_random_string(6) + "-" + generate_random_string(6) + "-" + generate_random_string(6)
     return ident
+
+
+def _delete_objects():
+    settings.remote_api = False
+    pyaedt_logger.remove_all_project_file_logger()
+    try:
+        del sys.modules["glob"]
+    except Exception:
+        logger.debug("Failed to delete glob module")
+    gc.collect()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -204,6 +214,7 @@ def add_app(local_scratch):
             "design": design_name,
             "version": desktop_version,
             "non_graphical": NONGRAPHICAL,
+            "remove_lock": True,
         }
         if solution_type:
             args["solution_type"] = solution_type

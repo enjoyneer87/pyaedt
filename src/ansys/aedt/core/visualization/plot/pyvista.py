@@ -27,33 +27,28 @@ import csv
 from datetime import datetime
 import math
 import os
+from pathlib import Path
 import tempfile
 import time
 import warnings
 
+import numpy as np
+
 from ansys.aedt.core.aedt_logger import pyaedt_logger
 from ansys.aedt.core.generic.constants import AEDT_UNITS
 from ansys.aedt.core.generic.constants import CSS4_COLORS
-from ansys.aedt.core.generic.general_methods import open_file
+from ansys.aedt.core.generic.file_utils import open_file
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
+from ansys.aedt.core.internal.checks import ERROR_GRAPHICS_REQUIRED
+from ansys.aedt.core.internal.checks import check_graphics_available
 
+# Check that graphics are available
 try:
-    import numpy as np
-except ImportError:
-    warnings.warn(
-        "The NumPy module is required to run some functionalities of PostProcess.\n"
-        "Install with \n\npip install numpy"
-    )
+    check_graphics_available()
 
-try:
     import pyvista as pv
-
-    pyvista_available = True
 except ImportError:
-    warnings.warn(
-        "The PyVista module is required to run some functionalities of PostProcess.\n"
-        "Install with \n\npip install pyvista"
-    )
+    warnings.warn(ERROR_GRAPHICS_REQUIRED)
 
 
 @pyaedt_function_handler()
@@ -192,23 +187,22 @@ def _parse_aedtplt(filepath):
         elements = []
         nodes_list = []
         solution = []
-        for l in drawing_lines:
-            if "BoundingBox(" in l:
-                bounding = l[l.find("(") + 1 : -2].split(",")
+        for line in drawing_lines:
+            if "BoundingBox(" in line:
+                bounding = line[line.find("(") + 1 : -2].split(",")
                 bounding = [i.strip() for i in bounding]
-            if "Elements(" in l:
-                elements = l[l.find("(") + 1 : -2].split(",")
+            if "Elements(" in line:
+                elements = line[line.find("(") + 1 : -2].split(",")
                 elements = [int(i.strip()) for i in elements]
-            if "Nodes(" in l:
-                nodes_list = l[l.find("(") + 1 : -2].split(",")
+            if "Nodes(" in line:
+                nodes_list = line[line.find("(") + 1 : -2].split(",")
                 nodes_list = [float(i.strip()) for i in nodes_list]
-            if "ElemSolution(" in l:
+            if "ElemSolution(" in line:
                 # convert list of strings to list of floats
-                sols = l[l.find("(") + 1 : -2].split(",")
+                sols = line[line.find("(") + 1 : -2].split(",")
                 sols = [is_float(value) for value in sols]
                 # sols = [float(i.strip()) for i in sols]
                 num_solution_per_element = int(sols[2])
-                num_elements = elements[1]
                 num_nodes = elements[6]
                 sols = sols[3:]
                 if num_nodes == num_solution_per_element or num_solution_per_element // num_nodes < 3:
@@ -228,13 +222,11 @@ def _parse_aedtplt(filepath):
 
         nodes = [[nodes_list[i], nodes_list[i + 1], nodes_list[i + 2]] for i in range(0, len(nodes_list), 3)]
         num_nodes = elements[0]
-        num_elements = elements[1]
         elements = elements[2:]
-        element_type = elements[0]
         num_nodes_per_element = elements[4]
         header_length = 5
         elements_nodes = []
-        # Todo Aedt 23R2 supports mixed elements size. To be implemented.
+        # TODO: Aedt 23R2 supports mixed elements size. To be implemented.
         for i in range(0, len(elements), num_nodes_per_element + header_length):
             elements_nodes.append([elements[i + header_length + n] for n in range(num_nodes_per_element)])
         if solution:
@@ -276,11 +268,7 @@ def _parse_aedtplt(filepath):
 
         faces.append(np.hstack(array))
         vertices.append(np.array(nodes))
-        # surf = pv.PolyData(vertices, faces)
 
-        # surf.point_data[field.label] = temps
-    # field.log = log
-    # field._cached_polydata = surf
     return vertices, faces, scalars, log
 
 
@@ -326,7 +314,7 @@ class ObjClass(object):
         self.units = units
         self._cached_mesh = None
         self._cached_polydata = None
-        self.name = os.path.splitext(os.path.basename(self.path))[0]
+        self.name = Path(self.path).stem
 
     @property
     def color(self):
@@ -386,7 +374,7 @@ class FieldClass(object):
         self._cached_mesh = None
         self._cached_polydata = None
         self.label = label
-        self.name = os.path.splitext(os.path.basename(self.path))[0]
+        self.name = Path(self.path).stem
         self.color = (255, 0, 0)
         self.surface_mapping_tolerance = tolerance
         self.header_lines = headers
@@ -440,6 +428,25 @@ class CommonPlotter(object):
         self._z_scale = 1.0
         self._convert_fields_in_db = False
         self._log_multiplier = 10.0
+        self._field_scale = 1
+        self.jupyter_backend = None
+        use_html_backend = os.environ.get("PYANSYS_VISUALIZER_HTML_BACKEND", "false").lower() == "true"
+        if use_html_backend:
+            self.jupyter_backend = "html"
+
+    @property
+    def vector_field_scale(self):
+        """Field scale.
+
+        Returns
+        -------
+        float
+        """
+        return self._field_scale
+
+    @vector_field_scale.setter
+    def vector_field_scale(self, value):
+        self._field_scale = value
 
     @property
     def convert_fields_in_db(self):
@@ -736,7 +743,7 @@ class CommonPlotter(object):
 
     @background_image.setter
     def background_image(self, value):
-        if os.path.exists(value):
+        if Path(value).exists():
             self._background_image = value
 
 
@@ -750,20 +757,24 @@ class ModelPlotter(CommonPlotter):
     Here an example of standalone project
 
     >>> model = ModelPlotter()
-    >>> model.add_object(r'D:\\Simulation\\antenna.obj', (200,20,255), 0.6, "in")
-    >>> model.add_object(r'D:\\Simulation\\helix.obj', (0,255,0), 0.5, "in")
-    >>> model.add_field_from_file(r'D:\\Simulation\\helic_antenna.csv', True, "meter", 1)
-    >>> model.background_color = (0,0,0)
+    >>> model.add_object(r"D:\\Simulation\\antenna.obj", (200, 20, 255), 0.6, "in")
+    >>> model.add_object(r"D:\\Simulation\\helix.obj", (0, 255, 0), 0.5, "in")
+    >>> model.add_field_from_file(r"D:\\Simulation\\helic_antenna.csv", True, "meter", 1)
+    >>> model.background_color = (0, 0, 0)
     >>> model.plot()
 
     And here an example of animation:
 
     >>> model = ModelPlotter()
-    >>> model.add_object(r'D:\\Simulation\\antenna.obj', (200,20,255), 0.6, "in")
-    >>> model.add_object(r'D:\\Simulation\\helix.obj', (0,255,0), 0.5, "in")
-    >>> frames = [r'D:\\Simulation\\helic_antenna.csv', r'D:\\Simulation\\helic_antenna_10.fld',
-    ...           r'D:\\Simulation\\helic_antenna_20.fld', r'D:\\Simulation\\helic_antenna_30.fld',
-    ...           r'D:\\Simulation\\helic_antenna_40.fld']
+    >>> model.add_object(r"D:\\Simulation\\antenna.obj", (200, 20, 255), 0.6, "in")
+    >>> model.add_object(r"D:\\Simulation\\helix.obj", (0, 255, 0), 0.5, "in")
+    >>> frames = [
+    ...     r"D:\\Simulation\\helic_antenna.csv",
+    ...     r"D:\\Simulation\\helic_antenna_10.fld",
+    ...     r"D:\\Simulation\\helic_antenna_20.fld",
+    ...     r"D:\\Simulation\\helic_antenna_30.fld",
+    ...     r"D:\\Simulation\\helic_antenna_40.fld",
+    ... ]
     >>> model.gif_file = r"D:\\Simulation\\animation.gif"
     >>> model.animate()
     """
@@ -985,6 +996,133 @@ class ModelPlotter(CommonPlotter):
         self.fields[-1]._cached_polydata = filedata
 
     @pyaedt_function_handler()
+    def _read_case(self, field):
+        file_path = Path(field.path).resolve()
+        reader = pv.get_reader(str(file_path)).read()
+        field._cached_polydata = reader[reader.keys()[0]].extract_surface()
+
+        if (
+            hasattr(field._cached_polydata.point_data, "active_vectors")
+            and field._cached_polydata.point_data.active_vectors_name
+        ):
+            field.scalar_name = field._cached_polydata.point_data.active_vectors_name
+
+            # Vector scale has to be divided by 50 to match the same scales as fld and aedtplt scales
+            field.vector_scale = (max(field._cached_polydata.bounds) - min(field._cached_polydata.bounds)) / (
+                50
+                * (
+                    np.vstack(field._cached_polydata.active_vectors).max()
+                    - np.vstack(field._cached_polydata.active_vectors).min()
+                )
+            )
+            field._cached_polydata["vectors"] = field._cached_polydata.active_vectors
+
+            field.is_vector = True
+        else:
+            field.scalar_name = field._cached_polydata.point_data.active_scalars_name
+
+    @pyaedt_function_handler()
+    def _read_aedtplt(self, field):
+        vertices, faces, scalars, log1 = _parse_aedtplt(field.path)
+        if self.convert_fields_in_db:
+            scalars = [np.multiply(np.log10(i), self.log_multiplier) for i in scalars]
+        fields_vals = pv.PolyData(vertices[0], faces[0])
+        field._cached_polydata = fields_vals
+        if isinstance(scalars[0], list):
+            field.vector_scale = (max(fields_vals.bounds) - min(fields_vals.bounds)) / (
+                50 * (np.vstack(scalars[0]).max() - np.vstack(scalars[0]).min())
+            )
+            field._cached_polydata["vectors"] = np.vstack(scalars).T
+            field.label = "Vector " + field.label
+            field._cached_polydata.point_data[field.label] = np.array(
+                [np.linalg.norm(x) for x in np.vstack(scalars[0]).T]
+            )
+            try:
+                field.scalar_name = field._cached_polydata.point_data.active_scalars_name
+                field.is_vector = True
+            except Exception:
+                field.is_vector = False
+        else:
+            field._cached_polydata.point_data[field.label] = scalars[0]
+            field.scalar_name = field._cached_polydata.point_data.active_scalars_name
+            field.is_vector = False
+        field.log = log1
+
+    @pyaedt_function_handler()
+    def _read_fld(self, field):
+        nodes = []
+        values = []
+        is_vector = False
+        with open_file(field.path, "r") as f:
+            try:
+                lines = f.read().splitlines()[field.header_lines :]
+                if field.path and field.path.endswith(".csv"):
+                    sniffer = csv.Sniffer()
+                    delimiter = sniffer.sniff(lines[0]).delimiter
+                else:
+                    delimiter = " "
+                if len(lines) > 2000 and not field._is_frame:
+                    lines = list(dict.fromkeys(lines))
+            except Exception:
+                lines = []
+                message = "Unable to update mesh because it is\n"
+                message += "already defined."
+                pyaedt_logger.warning(message)
+            for line in lines:
+                tmp = line.strip().split(delimiter)
+                tmp = [i for i in tmp if i and i.lower() != "nan"]
+                if len(tmp) not in [6, 9, 4]:
+                    continue
+                nodes.append([float(tmp[0]), float(tmp[1]), float(tmp[2])])
+                if len(tmp) == 6:  # Real vector
+                    values.append([float(tmp[3]), float(tmp[4]), float(tmp[5])])
+                    is_vector = field.is_vector = True
+                elif len(tmp) == 9:  # Complex vector as Re_x, Im_x, Re_y, Im_y, Re_z, Im_z
+                    values.append(
+                        [
+                            complex(float(tmp[3]), float(tmp[4])),
+                            complex(float(tmp[5]), float(tmp[6])),
+                            complex(float(tmp[7]), float(tmp[8])),
+                        ]
+                    )
+                    is_vector = field.is_vector = True
+                elif len(tmp) == 4:
+                    values.append(float(tmp[3]))
+        if self.convert_fields_in_db:
+            if not isinstance(values[0], list):
+                values = [self.log_multiplier * math.log10(abs(i)) for i in values]
+            else:
+                values = [[self.log_multiplier * math.log10(abs(i)) for i in value] for value in values]
+        if nodes:
+            try:
+                conv = 1 / AEDT_UNITS["Length"][self.units]
+            except Exception:
+                conv = 1
+            vertices = np.array(nodes) * conv
+            filedata = pv.PolyData(vertices)
+            if is_vector:
+                field.vector_scale = np.abs(
+                    (max(filedata.bounds) - min(filedata.bounds))
+                    / (50 * (np.vstack(values).max() - np.vstack(values).min()))
+                )
+                if isinstance(values[0][0], complex):
+                    values_np = np.array(values, dtype=np.complex128)
+                    filedata["real_vector"] = values_np.real
+                    filedata["imag_vector"] = values_np.imag
+                    filedata["vector_mag"] = np.linalg.norm(values_np.real**2 + values_np.imag**2, axis=1) ** 0.5
+                    field.scalar_name = "real_vector"
+                else:
+                    values_np = np.array(values, dtype=np.float64)
+                    filedata["vector_mag"] = values_np
+                    field.scalar_name = "vector_mag"
+
+            else:
+                filedata = filedata.delaunay_2d(tol=field.surface_mapping_tolerance)
+                filedata.point_data["magnitude"] = np.array(values)
+                field.scalar_name = "magnitude"
+            field._cached_polydata = filedata  # Update field data
+
+    @pyaedt_function_handler()
     def _read_mesh_files(self, read_frames=False):
         for cad in self.objects:
             if not cad._cached_polydata:
@@ -992,132 +1130,25 @@ class ModelPlotter(CommonPlotter):
                 cad._cached_polydata = filedata
             color_cad = [i / 255 for i in cad.color]
             cad._cached_mesh = self.pv.add_mesh(cad._cached_polydata, color=color_cad, opacity=cad.opacity)
-            # if self.meshes:
-            #     self.meshes += cad._cached_polydata
-            # else:
-            #     self.meshes = cad._cached_polydata
         obj_to_iterate = [i for i in self._fields]
         if read_frames:
             for i in self.frames:
                 obj_to_iterate.append(i)
         for field in obj_to_iterate:
             if field.path and not field._cached_polydata:
-                if ".case" in field.path:
-                    reader = pv.get_reader(os.path.abspath(field.path)).read()
-                    field._cached_polydata = reader[reader.keys()[0]].extract_surface()
-
-                    if (
-                        hasattr(field._cached_polydata.point_data, "active_vectors")
-                        and field._cached_polydata.point_data.active_vectors_name
-                    ):
-                        field.scalar_name = field._cached_polydata.point_data.active_scalars_name
-                        vector_scale = (max(field._cached_polydata.bounds) - min(field._cached_polydata.bounds)) / (
-                            10
-                            * (
-                                np.vstack(field._cached_polydata.active_vectors).max()
-                                - np.vstack(field._cached_polydata.active_vectors).min()
-                            )
-                        )
-                        field._cached_polydata["vectors"] = field._cached_polydata.active_vectors * vector_scale
-
-                        field.is_vector = True
-                    else:
-                        field.scalar_name = field._cached_polydata.point_data.active_scalars_name
-
-                elif ".aedtplt" in field.path:  # pragma no cover
-                    vertices, faces, scalars, log1 = _parse_aedtplt(field.path)
-                    if self.convert_fields_in_db:
-                        scalars = [np.multiply(np.log10(i), self.log_multiplier) for i in scalars]
-                    fields_vals = pv.PolyData(vertices[0], faces[0])
-                    field._cached_polydata = fields_vals
-                    if isinstance(scalars[0], list):
-                        vector_scale = (max(fields_vals.bounds) - min(fields_vals.bounds)) / (
-                            50 * (np.vstack(scalars[0]).max() - np.vstack(scalars[0]).min())
-                        )
-
-                        field._cached_polydata["vectors"] = np.vstack(scalars).T * vector_scale
-                        field.label = "Vector " + field.label
-                        field._cached_polydata.point_data[field.label] = np.array(
-                            [np.linalg.norm(x) for x in np.vstack(scalars[0]).T]
-                        )
-                        try:
-                            field.scalar_name = field._cached_polydata.point_data.active_scalars_name + " Magnitude"
-                            field.is_vector = True
-                        except Exception:
-                            field.is_vector = False
-                    else:
-                        field._cached_polydata.point_data[field.label] = scalars[0]
-                        field.scalar_name = field._cached_polydata.point_data.active_scalars_name
-                        field.is_vector = False
-                    field.log = log1
-                else:
-                    nodes = []
-                    values = []
-                    is_vector = False
-                    with open_file(field.path, "r") as f:
-                        try:
-                            lines = f.read().splitlines()[field.header_lines :]
-                            if ".csv" in field.path:
-                                sniffer = csv.Sniffer()
-                                delimiter = sniffer.sniff(lines[0]).delimiter
-                            else:
-                                delimiter = " "
-                            if len(lines) > 2000 and not field._is_frame:
-                                lines = list(dict.fromkeys(lines))
-                                # decimate = 2
-                                # del lines[decimate - 1 :: decimate]
-                        except Exception:
-                            lines = []
-                        for line in lines:
-                            tmp = line.strip().split(delimiter)
-                            if len(tmp) < 4:
-                                continue
-                            nodes.append([float(tmp[0]), float(tmp[1]), float(tmp[2])])
-                            if len(tmp) == 6:
-                                values.append([float(tmp[3]), float(tmp[4]), float(tmp[5])])
-                                is_vector = True
-                            elif len(tmp) == 9:
-                                values.append([float(tmp[3]), float(tmp[5]), float(tmp[7])])
-                                is_vector = True
-                            else:
-                                values.append(float(tmp[3]))
-                    if self.convert_fields_in_db:
-                        if not isinstance(values[0], list):
-                            values = [self.log_multiplier * math.log10(abs(i)) for i in values]
-                        else:
-                            values = [[self.log_multiplier * math.log10(abs(i)) for i in value] for value in values]
-                    if nodes:
-                        try:
-                            conv = 1 / AEDT_UNITS["Length"][self.units]
-                        except Exception:
-                            conv = 1
-                        vertices = np.array(nodes) * conv
-                        filedata = pv.PolyData(vertices)
-                        if is_vector:
-                            vector_scale = (max(filedata.bounds) - min(filedata.bounds)) / (
-                                20 * (np.vstack(values).max() - np.vstack(values).min())
-                            )
-                            filedata["vectors"] = np.vstack(values) * vector_scale
-                            field.label = "Vector " + field.label
-                            filedata.point_data[field.label] = np.array([np.linalg.norm(x) for x in np.vstack(values)])
-                            field.scalar_name = field._cached_polydata.point_data.active_scalars_name
-                            field.is_vector = True
-                        else:
-                            filedata = filedata.delaunay_2d(tol=field.surface_mapping_tolerance)
-                            filedata.point_data[field.label] = np.array(values)
-                            field.scalar_name = filedata.point_data.active_scalars_name
-                        field._cached_polydata = filedata
+                field_path = Path(field.path)
+                if field_path.suffix == ".case":
+                    self._read_case(field)
+                elif field_path.suffix == ".aedtplt":
+                    self._read_aedtplt(field)
+                elif field_path.suffix in [".fld", ".csv"]:
+                    self._read_fld(field)
 
     @pyaedt_function_handler()
     def _add_buttons(self):
         size = int(self.pv.window_size[1] / 40)
-        startpos = self.pv.window_size[1] - 2 * size
-        endpos = 100
         color = self.pv.background_color
         axes_color = [0 if i >= 0.5 else 255 for i in color]
-        buttons = []
-        texts = []
-        max_elements = (startpos - endpos) // (size + (size // 10))
 
         class SetVisibilityCallback:
             """Helper callback to keep a reference to the actor being modified."""
@@ -1245,16 +1276,21 @@ class ModelPlotter(CommonPlotter):
         for field in self._fields:
             sargs["title"] = field.label
             if field.is_vector:
-                field._cached_polydata.set_active_vectors("vectors")
-                field._cached_polydata["vectors"] = field._cached_polydata["vectors"] * field.vector_scale
+                field._cached_polydata[field.scalar_name] *= self.vector_field_scale * field.vector_scale
+                if not field._cached_polydata.arrows:
+                    arrows = field._cached_polydata.glyph(orient=field.scalar_name, scale=field.scalar_name, factor=1)
+                else:
+                    arrows = field._cached_polydata.arrows
+                field._cached_polydata[field.scalar_name] = field._cached_polydata[field.scalar_name] / (
+                    self.vector_field_scale * field.vector_scale
+                )
+                scalars = arrows[arrows.active_scalars_name] / (self.vector_field_scale * field.vector_scale)
                 self.pv.add_mesh(
-                    field._cached_polydata.arrows,
-                    scalars=field.scalar_name,
-                    log_scale=False if self.convert_fields_in_db else field.log_scale,
-                    scalar_bar_args=sargs,
+                    arrows,
+                    scalars=scalars,
                     cmap=field.color_map,
                 )
-                field._cached_polydata["vectors"] = field._cached_polydata["vectors"] / field.vector_scale
+                field.label = field.scalar_name
             elif self.range_max is not None and self.range_min is not None:
                 field._cached_mesh = self.pv.add_mesh(
                     field._cached_polydata,
@@ -1333,30 +1369,36 @@ class ModelPlotter(CommonPlotter):
         """
         self.populate_pyvista_object()
         if export_image_path:
-            path_image = os.path.dirname(export_image_path)
-            root_name, format = os.path.splitext(os.path.basename(export_image_path))
+            path_image = Path(export_image_path).parent
+            file_path = Path(export_image_path)
+            root_name, file_extension = file_path.stem, file_path.suffix
         else:
-            path_image = tempfile.gettempdir()  # pragma: no cover
-            format = ".png"  # pragma: no cover
+            path_image = Path(tempfile.gettempdir())  # pragma: no cover
+            file_extension = ".png"  # pragma: no cover
             root_name = "Image"  # pragma: no cover
 
         def s_callback():  # pragma: no cover
             """Save screenshots."""
-            exp = os.path.join(path_image, f'{root_name}{datetime.now().strftime("%Y_%M_%d_%H-%M-%S")}{format}')
-            self.pv.screenshot(exp, return_img=False)
+            exp = path_image / f"{root_name}{datetime.now().strftime('%Y_%m_%d_%H-%M-%S')}{file_extension}"
+            self.pv.screenshot(str(exp), return_img=False)
 
         self.pv.add_key_event("s", s_callback)
         if export_image_path:  # pragma: no cover
             supported_export = [".svg", ".pdf", ".eps", ".ps", ".tex"]
-            extension = os.path.splitext(export_image_path)[1]
+            extension = Path(export_image_path).suffix
             if extension in supported_export:
                 self.pv.save_graphic(export_image_path)
             else:
-                self.pv.show(auto_close=False, screenshot=export_image_path, full_screen=True)
+                self.pv.show(
+                    auto_close=False,
+                    screenshot=export_image_path,
+                    full_screen=True,
+                    jupyter_backend=self.jupyter_backend,
+                )
         elif show and self.is_notebook:  # pragma: no cover
-            self.pv.show(auto_close=False)  # pragma: no cover
+            self.pv.show(auto_close=False, jupyter_backend=self.jupyter_backend)  # pragma: no cover
         elif show:
-            self.pv.show(auto_close=False, full_screen=True)  # pragma: no cover
+            self.pv.show(auto_close=False, full_screen=True, jupyter_backend=self.jupyter_backend)  # pragma: no cover
 
         self.image_file = export_image_path
         return True
@@ -1377,23 +1419,32 @@ class ModelPlotter(CommonPlotter):
         """
         if remove_objs:
             for el in self.objects:
-                if os.path.exists(el.path):
-                    os.remove(el.path)
+                file_path = Path(el.path)
+                if file_path.exists():
+                    file_path.unlink()
                 if clean_cache:
                     el._cached_mesh = None
                     el._cached_polydata = None
+
         if remove_fields:
             for el in self.fields:
-                if os.path.exists(el.path):
-                    os.remove(el.path)
+                file_path = Path(el.path)
+                if file_path.exists():
+                    file_path.unlink()
                 if clean_cache:
                     el._cached_mesh = None
                     el._cached_polydata = None
         return True
 
     @pyaedt_function_handler()
-    def animate(self):
+    def animate(self, show=True):
         """Animate the current field plot.
+
+        show : bool, optional
+            Whether to display the pyvista plot.
+            When False, a :class::pyvista.Plotter object is created
+            and assigned to the pv property so that it can be
+            modified further. Default is True.
 
         Returns
         -------
@@ -1401,11 +1452,18 @@ class ModelPlotter(CommonPlotter):
         """
         if len(self.frames) <= 0:
             raise RuntimeError("Number of Fields have to be greater than 1 to do an animation.")
+
+        off_screen = False
+        if not show:
+            off_screen = True
+        self.off_screen = off_screen
+
         if self.is_notebook:
             self.pv = pv.Plotter(notebook=self.is_notebook, off_screen=True, window_size=self.windows_size)
         else:
-            self.pv = pv.Plotter(notebook=self.is_notebook, window_size=self.windows_size)
-            self.pv.off_screen = self.off_screen
+            self.pv = pv.Plotter(notebook=self.is_notebook, window_size=self.windows_size, off_screen=off_screen)
+            self.pv.off_screen = off_screen
+
         if self.background_image:
             self.pv.add_background_image(self.background_image)
         else:
@@ -1548,16 +1606,44 @@ class ModelPlotter(CommonPlotter):
                     break
                 i = 0
                 first_loop = False
-            mesh_i = self.frames[i]._cached_polydata
-            scalars = mesh_i.point_data[self.frames[i].scalar_name]
-            mesh_i.point_data[self.frames[i].scalar_name] = scalars
-            if not hasattr(self.pv, "ren_win"):
+
+            displayed_mesh = self.frames[0]._cached_polydata
+            new_mesh = self.frames[i]._cached_polydata
+
+            # If they have the same points just update the scalars
+            if displayed_mesh.n_points == new_mesh.n_points:
+                # Update the points just in case
+                displayed_mesh.points[:] = new_mesh.points
+
+                # Update scalars
+                displayed_mesh.point_data[self.frames[0].scalar_name] = new_mesh.point_data[self.frames[i].scalar_name]
+
+                # Notify VTK
+                displayed_mesh.Modified()
+            else:
+                # If the geometry has changed, updates everything
+                self.pv.remove_actor("FieldPlot")
+                self.frames[i]._cached_mesh = self.pv.add_mesh(
+                    new_mesh,
+                    scalars=self.frames[i].scalar_name,
+                    log_scale=False if self.convert_fields_in_db else self.frames[i].log_scale,
+                    scalar_bar_args=sargs,
+                    cmap=self.frames[i].color_map,
+                    clim=[mins, maxs],
+                    show_edges=False,
+                    pickable=True,
+                    smooth_shading=True,
+                    name="FieldPlot",
+                    opacity=self.frames[i].opacity,
+                )
+
+            if not hasattr(self.pv, "ren_win"):  # pragma: no cover
                 break
             time.sleep(max(0, (1 / self.frame_per_seconds) - (time.time() - start)))
             start = time.time()
             if self.off_screen:
                 self.pv.render()
-            else:
+            else:  # pragma: no cover
                 self.pv.update(1, force_redraw=True)
             if first_loop:
                 self.pv.write_frame()
@@ -1586,6 +1672,73 @@ class ModelPlotter(CommonPlotter):
                 translated_mesh.translate(offset_xyz, inplace=True)
                 self.meshes += translated_mesh
         return self.meshes
+
+    @pyaedt_function_handler()
+    def point_cloud(self, points: int = 10) -> dict:
+        """Generate point cloud with available objects.
+
+        Parameters
+        ----------
+        points : int, optional
+            Number of points to generate. The default is ``10``.
+
+        Returns
+        -------
+        dict
+            Dictionary containing the point cloud for each object. Each entry has the object name as the key and a list
+            with two elements: the path to the output ``.pts`` file and the ``pyvista.PolyData`` object.
+        """
+        point_cloud = {}
+        for pyvista_object in self.objects:
+            # Load the mesh
+            mesh = pv.read(pyvista_object.path)
+
+            # Ensure the mesh is triangulated
+            mesh = mesh.triangulate()
+
+            # Get the areas of each triangle
+            triangle_areas = mesh.compute_cell_sizes()["Area"]
+
+            # Normalize the areas to get probabilities
+            probabilities = triangle_areas / triangle_areas.sum()
+
+            # Randomly sample triangles based on area
+            sampled_triangle_indices = np.random.choice(len(probabilities), size=points, p=probabilities)
+
+            # Get the vertices of the sampled triangles
+            sampled_points = []
+            for idx in sampled_triangle_indices:
+                triangle = mesh.extract_cells(idx)
+                vertices = triangle.points
+                # Sample a random point inside the triangle using barycentric coordinates
+                r1, r2 = np.random.rand(2)
+                sqrt_r1 = np.sqrt(r1)
+                u = 1 - sqrt_r1
+                v = r2 * sqrt_r1
+                w = 1 - u - v
+                random_point = u * vertices[0] + v * vertices[1] + w * vertices[2]
+                sampled_points.append(random_point)
+
+            point_cloud[pyvista_object.name] = None
+
+            output = []
+            # Create a point cloud from the sampled points
+            pcd = pv.PolyData(np.array(sampled_points))
+
+            point_nodes = np.asarray(pcd.points)
+            extension = ".pts"
+            pts_file = Path(pyvista_object.path).parent / f"{pyvista_object.name}{extension}"
+
+            with open(pts_file, "w", newline="") as file:
+                writer = csv.writer(file, delimiter="\t")
+                for point in point_nodes:
+                    writer.writerow(point / 1000)
+
+            output.append(pts_file)
+            output.append(pcd)
+            point_cloud[pyvista_object.name] = output
+
+        return point_cloud
 
     def close(self):
         """Close the render window."""

@@ -24,8 +24,8 @@
 
 from ansys.aedt.core.generic.data_handlers import _dict2arg
 from ansys.aedt.core.generic.data_handlers import random_string
-from ansys.aedt.core.generic.errors import GrpcApiError
 from ansys.aedt.core.generic.general_methods import pyaedt_function_handler
+from ansys.aedt.core.internal.errors import GrpcApiError
 from ansys.aedt.core.modeler.cad.elements_3d import BinaryTreeNode
 from ansys.aedt.core.modules.boundary.common import BoundaryCommon
 from ansys.aedt.core.modules.boundary.common import BoundaryProps
@@ -53,7 +53,7 @@ class NativeComponentObject(BoundaryCommon, BinaryTreeNode):
 
     >>> from ansys.aedt.core import Hfss
     >>> hfss = Hfss(solution_type="SBR+")
-    >>> ffd_file ="path/to/ffdfile.ffd"
+    >>> ffd_file = "path/to/ffdfile.ffd"
     >>> par_beam = hfss.create_sbr_file_based_antenna(ffd_file)
     >>> par_beam.native_properties["Size"] = "0.1mm"
     >>> par_beam.update()
@@ -217,12 +217,12 @@ class NativeComponentObject(BoundaryCommon, BinaryTreeNode):
 
         """
         try:
-            names = [i for i in self._app.excitations]
+            names = [i for i in self._app.excitation_names]
         except GrpcApiError:  # pragma: no cover
             names = []
         self._name = self._app.modeler.oeditor.InsertNativeComponent(self._get_args())
         try:
-            a = [i for i in self._app.excitations if i not in names]
+            a = [i for i in self._app.excitation_names if i not in names]
             self.excitation_name = a[0].split(":")[0]
         except (GrpcApiError, IndexError):
             self.excitation_name = self._name
@@ -238,7 +238,6 @@ class NativeComponentObject(BoundaryCommon, BinaryTreeNode):
             ``True`` when successful, ``False`` when failed.
 
         """
-
         self.update_props = {}
         self.update_props["DefinitionName"] = self.props["SubmodelDefinitionName"]
         self.update_props["GeometryDefinitionParameters"] = self.props["GeometryDefinitionParameters"]
@@ -435,7 +434,7 @@ class NativeComponentPCB(NativeComponentObject, object):
         """Set metal fraction mapping resolution.
 
         Parameters
-        -------
+        ----------
         resolution : int
             Resolution level. Accepted variables between 1 and 5.
 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ruff: noqa: F821
 #
 # Copyright (C) 2021 - 2024 ANSYS, Inc. and/or its affiliates.
 # SPDX-License-Identifier: MIT
@@ -29,19 +30,18 @@ import shutil
 import sys
 
 try:
-    import subprocess
+    import subprocess  # nosec
 except ImportError:
-    import subprocessdotnet as subprocess
+    import subprocessdotnet as subprocess  # nosec
 
 is_iron_python = platform.python_implementation().lower() == "ironpython"
 is_linux = os.name == "posix"
 is_windows = not is_linux
 
-
 VENV_DIR_PREFIX = ".pyaedt_env"
 
 """
-It is possible create Python virtual environment in a specific directory by setting variable VENV_DIR. 
+It is possible create Python virtual environment in a specific directory by setting variable VENV_DIR.
 For example,
 VENV_DIR = "e:/pyaedt_env"
 """
@@ -51,7 +51,6 @@ if not VENV_DIR:
         VENV_DIR = os.path.join(os.environ["APPDATA"], VENV_DIR_PREFIX)
     else:
         VENV_DIR = os.path.join(os.environ["HOME"], VENV_DIR_PREFIX)
-
 
 DISCLAIMER = (
     "This script will download and install certain third-party software and/or "
@@ -93,13 +92,13 @@ def run_pyinstaller_from_c_python(oDesktop):
     if is_student_version(oDesktop):
         command.append("--student")
     if is_linux:
-        command.extend([r'--edt_root={}'.format(edt_root), '--python_version="{}"'.format(python_version)])
+        command.extend([r"--edt_root={}".format(edt_root), '--python_version="{}"'.format(python_version)])
 
     if wheelpyaedt:
-        command.extend([r'--wheel={}'.format(wheelpyaedt)])
+        command.extend([r"--wheel={}".format(wheelpyaedt)])
 
     oDesktop.AddMessage("", "", 0, "Installing PyAEDT.")
-    return_code = subprocess.call(command)
+    return_code = subprocess.call(command)  # nosec
 
     err_msg = "There was an error while installing PyAEDT."
     if is_linux:
@@ -137,14 +136,14 @@ def run_pyinstaller_from_c_python(oDesktop):
         # f.write("import sys\n")
         # f.write('sys.path.insert(0, r"c:\\ansysdev\\git\\repos\\pyaedt")\n')
         if version <= "231":
-            f.write("from pyaedt.workflows.installer.pyaedt_installer import add_pyaedt_to_aedt\n")
+            f.write("from pyaedt.extensions.installer.pyaedt_installer import add_pyaedt_to_aedt\n")
             f.write(
                 'add_pyaedt_to_aedt(aedt_version="{}", personallib=r"{}")\n'.format(
                     oDesktop.GetVersion()[:6], oDesktop.GetPersonalLibDirectory()
                 )
             )
         else:
-            f.write("from ansys.aedt.core.workflows.installer.pyaedt_installer import add_pyaedt_to_aedt\n")
+            f.write("from ansys.aedt.core.extensions.installer.pyaedt_installer import add_pyaedt_to_aedt\n")
             f.write(
                 'add_pyaedt_to_aedt(aedt_version="{}", personal_lib=r"{}")\n'.format(
                     oDesktop.GetVersion()[:6], oDesktop.GetPersonalLibDirectory()
@@ -153,7 +152,7 @@ def run_pyinstaller_from_c_python(oDesktop):
 
     command = r'"{}" "{}"'.format(python_exe, python_script)
     oDesktop.AddMessage("", "", 0, "Configuring PyAEDT panels in automation tab.")
-    ret_code = subprocess.call([python_exe, python_script])
+    ret_code = subprocess.call([python_exe, python_script])  # nosec
     if ret_code != 0:
         oDesktop.AddMessage("", "", 2, "Error occurred configuring the PyAEDT panels.")
         return
@@ -193,13 +192,14 @@ def parse_arguments_for_pyaedt_installer(args=None):
         parser.error("No arguments given!")
     return args
 
+
 def unzip_if_zip(path):
     """Unzip path if it is a ZIP file."""
     import zipfile
 
     # Extracted folder
     unzipped_path = path
-    if path.suffix == '.zip':
+    if path.suffix == ".zip":
         unzipped_path = path.parent / path.stem
         if unzipped_path.exists():
             shutil.rmtree(unzipped_path, ignore_errors=True)
@@ -249,89 +249,68 @@ def install_pyaedt():
     if not venv_dir.exists():
         print("Creating the virtual environment in {}".format(venv_dir))
         if args.version <= "231":
-            subprocess.call([sys.executable, "-m", "venv", str(venv_dir), "--system-site-packages"])
+            subprocess.run([sys.executable, "-m", "venv", str(venv_dir), "--system-site-packages"], check=True)  # nosec
         else:
-            subprocess.call([sys.executable, "-m", "venv", str(venv_dir)])
+            subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)  # nosec
 
         if args.wheel and Path(args.wheel).exists():
             print("Installing PyAEDT using provided wheels argument")
             unzipped_path = unzip_if_zip(Path(args.wheel))
+            command = [
+                str(pip_exe),
+                "install",
+                "--no-cache-dir",
+                "--no-index",
+                r"--find-links={}".format(str(unzipped_path)),
+            ]
             if args.version <= "231":
-                subprocess.call(
-                    [
-                        str(pip_exe),
-                        "install",
-                        "--no-cache-dir",
-                        "--no-index",
-                        r"--find-links={}".format(str(unzipped_path)),
-                        "pyaedt[all,dotnet]=='0.9.0'",
-                    ]
-                )
+                command.append("pyaedt[all,dotnet]=='0.9.0'")
             else:
-                subprocess.call(
-                    [
-                        str(pip_exe),
-                        "install",
-                        "--no-cache-dir",
-                        "--no-index",
-                        r"--find-links={}".format(str(unzipped_path)),
-                        "pyaedt[installer]",
-                    ]
-                )
-
+                command.append("pyaedt[all]")
+            subprocess.run(command, check=True)  # nosec
         else:
             print("Installing PyAEDT using online sources")
-            subprocess.call([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"])
-            subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "wheel"])
+            subprocess.run([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"], check=True)  # nosec
+            subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "wheel"], check=True)  # nosec
             if args.version <= "231":
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "pyaedt[all]=='0.9.0'"])
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "jupyterlab"])
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "ipython", "-U"])
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "ipyvtklink"])
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "pyaedt[all]=='0.9.0'"], check=True)  # nosec
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "jupyterlab"], check=True)  # nosec
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "ipython", "-U"], check=True)  # nosec
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "ipyvtklink"], check=True)  # nosec
             else:
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "pyaedt[installer]"])
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "pyaedt[all]"], check=True)  # nosec
 
         if args.version <= "231":
-            subprocess.call([str(pip_exe), "uninstall", "-y", "pywin32"])
+            subprocess.run([str(pip_exe), "uninstall", "-y", "pywin32"], check=True)  # nosec
 
     else:
         print("Using existing virtual environment in {}".format(venv_dir))
-        subprocess.call([str(pip_exe), "uninstall", "-y", "pyaedt"])
+        subprocess.call([str(pip_exe), "uninstall", "-y", "pyaedt"])  # nosec
 
         if args.wheel and Path(args.wheel).exists():
             print("Installing PyAEDT using provided wheels argument")
             unzipped_path = unzip_if_zip(Path(args.wheel))
+            command = [
+                str(pip_exe),
+                "install",
+                "--no-cache-dir",
+                "--no-index",
+                r"--find-links={}".format(str(unzipped_path)),
+            ]
             if args.version <= "231":
-                subprocess.call(
-                    [
-                        str(pip_exe),
-                        "install",
-                        "--no-cache-dir",
-                        "--no-index",
-                        r"--find-links={}".format(str(unzipped_path)),
-                        "pyaedt[all,dotnet]=='0.9.0'",
-                    ]
-                )
+                command.append("pyaedt[all,dotnet]=='0.9.0'")
             else:
-                subprocess.call(
-                    [
-                        str(pip_exe),
-                        "install",
-                        "--no-cache-dir",
-                        "--no-index",
-                        r"--find-links={}".format(str(unzipped_path)),
-                        "pyaedt[installer]",
-                    ]
-                )
+                command.append("pyaedt[all]")
+            subprocess.run(command, check=True)  # nosec
         else:
             print("Installing PyAEDT using online sources")
             if args.version <= "231":
-                subprocess.call([str(pip_exe), "pip=1000", "install", "pyaedt[all]=='0.9.0'"])
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "jupyterlab"])
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "ipython", "-U"])
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "ipyvtklink"])
+                subprocess.run([str(pip_exe), "pip=1000", "install", "pyaedt[all]=='0.9.0'"], check=True)  # nosec
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "jupyterlab"], check=True)  # nosec
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "ipython", "-U"], check=True)  # nosec
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "ipyvtklink"], check=True)  # nosec
             else:
-                subprocess.call([str(pip_exe), "--default-timeout=1000", "install", "pyaedt[installer]"])
+                subprocess.run([str(pip_exe), "--default-timeout=1000", "install", "pyaedt[all]"], check=True)  # nosec
     sys.exit(0)
 
 
@@ -354,7 +333,6 @@ def validate_disclaimer():
 
 
 if __name__ == "__main__":
-
     if is_iron_python:
         if "GetIsNonGraphical" in oDesktop.__dir__() and oDesktop.GetIsNonGraphical():
             print("When using IronPython, this script is expected to be run in graphical mode.")

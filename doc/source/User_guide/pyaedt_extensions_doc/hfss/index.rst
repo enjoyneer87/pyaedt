@@ -16,3 +16,24 @@ HFSS extensions
             :margin: 2 2 0 0
 
             Edit a source from file data in HFSS.
+
+   .. grid-item-card:: Shielding effectiveness
+            :link: shielding
+            :link-type: doc
+            :margin: 2 2 0 0
+
+            Shielding effectiveness workflow in HFSS.
+
+   .. grid-item-card:: Move it
+            :link: move_it
+            :link-type: doc
+            :margin: 2 2 0 0
+
+            From a line generate the parameters needed to simulate a trajectory.
+
+   .. grid-item-card:: MCAD Assembly
+            :link: mcad_assembly
+            :link-type: doc
+            :margin: 2 2 0 0
+
+            Automated assembly workflow.
