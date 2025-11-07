@@ -39,13 +39,18 @@ class SamplingNode(EmitNode):
         return self._parent
 
     @property
+    def node_type(self) -> str:
+        """The type of this emit node."""
+        return self._node_type
+
+    @property
     def table_data(self):
-        """Table.
+        """Frequency Ranges Table.
         Table consists of 2 columns.
         Min:
-            Value should be greater than 1.0.
+            Value should be between 1.0 and 100e9.
         Max:
-            Value should be greater than 1.0.
+            Value should be between 1.0 and 100e9.
         """
         return self._get_table_data()
 
