@@ -403,3 +403,9 @@ model.index\+
 
 # Custom instructions for GitHub Copilot
 .github/copilot-instructions.md
+
+
+*.x_b
+*.fct
+*.asol*
+*.pth
